@@ -1,27 +1,31 @@
 package com.example.runningspot.ui.components
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.vector.ImageVector
+
+data class BottomNavDestination(
+    val route: String,
+    val icon: ImageVector,
+    val label: String
+)
 
 @Composable
-fun BottomNavBar(selectedIndex: Int, onTabSelected: (Int) -> Unit) {
-    val items = listOf(
-        Icons.Default.Info to "정보",
-        Icons.Default.Leaderboard to "통계",
-        Icons.Default.DirectionsRun to "러닝",
-        Icons.Default.People to "커뮤니티",
-        Icons.Default.Person to "마이"
-    )
-
+fun BottomNavBar(
+    destinations: List<BottomNavDestination>,
+    currentRoute: String?,
+    onTabSelected: (BottomNavDestination) -> Unit
+) {
     NavigationBar {
-        items.forEachIndexed { index, pair ->
+        destinations.forEach { destination ->
             NavigationBarItem(
-                icon = { Icon(pair.first, contentDescription = pair.second) },
-                label = { Text(pair.second) },
-                selected = selectedIndex == index,
-                onClick = { onTabSelected(index) }
+                icon = { Icon(destination.icon, contentDescription = destination.label) },
+                label = { Text(destination.label) },
+                selected = currentRoute == destination.route,
+                onClick = { onTabSelected(destination) }
             )
         }
     }
