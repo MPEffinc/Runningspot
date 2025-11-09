@@ -80,6 +80,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation ("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.kakao.maps.open:android:2.12.18")
 
 
     implementation("com.kakao.maps.open:android:2.12.18")
