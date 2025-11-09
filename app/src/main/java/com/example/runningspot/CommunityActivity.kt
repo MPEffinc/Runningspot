@@ -153,7 +153,6 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
 
             Spacer(Modifier.height(16.dp))
 
-            // ✅ 저장 버튼
             Button(
                 onClick = {
                     if (title.isNotBlank() && content.isNotBlank()) {
@@ -307,7 +306,6 @@ fun CommunityDetailScreen(
                 Text("$likes   💬 ${commentList.size}")
             }
 
-            // ✅ 댓글 입력
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -331,7 +329,6 @@ fun CommunityDetailScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // ✅ 댓글 목록
             if (commentList.isNotEmpty()) {
                 Text("댓글 (${commentList.size})", fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
@@ -372,7 +369,6 @@ fun CommunityDetailScreen(
     }
 }
 
-// ✅ 댓글 저장/불러오기
 fun saveComments(prefs: SharedPreferences, postId: Int, comments: List<Pair<String, String>>) {
     val json = JSONArray().apply {
         comments.forEach { (writer, text) ->
