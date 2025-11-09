@@ -33,6 +33,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -61,21 +62,24 @@ fun MainScreen(
 
     val runningScreen = remember { mutableStateOf<(@Composable (PaddingValues) -> Unit)>({ RunningScreen(it) }) }
 
+    val stateHolder = rememberSaveableStateHolder()
+
     Scaffold(
         bottomBar = { BottomNavBar(selectedTab, onTabSelected = { selectedTab = it }) }
     ) { padding ->
 
         when (selectedTab) {
-            0 -> InfoScreen(padding)
-            1 -> StatsScreen(padding)
-            2 -> runningScreen.value.invoke(padding)
-            3 -> CommunityScreen(padding)
-            4 -> MyPageScreen(
+            0 -> stateHolder.SaveableStateProvider("info") { InfoScreen(padding) }
+            1 -> stateHolder.SaveableStateProvider("stats") { StatsScreen(padding) }
+            2 -> stateHolder.SaveableStateProvider("running") { runningScreen.value.invoke(padding)}
+            3 -> stateHolder.SaveableStateProvider("community") { CommunityScreen(padding) }
+            4 -> stateHolder.SaveableStateProvider("mypage") { MyPageScreen(
                 padding = padding,
                 userName = userName,
                 userProfile = userProfile,
                 provider = provider,
                 onLogout = onLogout)
+            }
         }
     }
 }
@@ -432,28 +436,169 @@ fun StatsScreen(padding: PaddingValues) {
 
 @Composable
 fun CommunityScreen(padding: PaddingValues) {
-    LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    // 게시글 상태
+    var posts by remember {
+        mutableStateOf(
+            mutableListOf<Post>(
+                Post(1, "홍길동", "오늘 인천대공원에서 뛰었어요!", 5),
+                Post(2, "김민수", "Crew Momentum 러닝 모임 모집합니다!", 8)
+            )
+        )
+    }
+
+    // 게시글 작성 다이얼로그 제어
+    var showPostDialog by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(posts.size) { index ->
+                PostItem(
+                    post = posts[index],
+                    onLike = {
+                        posts = posts.toMutableList().apply {
+                            this[index] = this[index].copy(
+                                isLiked = !this[index].isLiked,
+                                likes = if (this[index].isLiked) this[index].likes - 1 else this[index].likes + 1
+                            )
+                        }
+                    },
+                    onAddComment = { comment ->
+                        posts = posts.toMutableList().apply {
+                            this[index].comments.add(comment)
+                        }
+                    }
+                )
+            }
+        }
+
+        // 게시글 작성 버튼
+        FloatingActionButton(
+            onClick = { showPostDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.primary
+        ) {
+            Text("+")
+        }
+
+        if (showPostDialog) {
+            WritePostDialog(
+                onDismiss = { showPostDialog = false },
+                onPost = { content ->
+                    val newPost = Post(
+                        id = posts.size + 1,
+                        author = "사용자",
+                        content = content,
+                        likes = 0
+                    )
+                    posts = (listOf(newPost) + posts).toMutableList() // 최신글 상단 삽입
+                    showPostDialog = false
+                }
+            )
+        }
+    }
+}
+
+data class Post(
+    val id: Int,
+    val author: String,
+    val content: String,
+    val likes: Int,
+    val comments: MutableList<String> = mutableListOf(),
+    val isLiked: Boolean = false
+)
+
+@Composable
+fun PostItem(post: Post, onLike: () -> Unit, onAddComment: (String) -> Unit) {
+    var showComments by remember { mutableStateOf(false) }
+    var commentText by remember { mutableStateOf("") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(4.dp)
     ) {
-        items(3) { i ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(4.dp)
+        Column(Modifier.padding(12.dp)) {
+            Text(post.author, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(post.content)
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("사용자 ${i + 1}의 러닝 후기", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("오늘 ${4 + i}km 뛰었어요! 상쾌한 날씨 ☀️")
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("❤️ ${10 + i}")
-                        Text("💬 ${2 + i}")
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TextButton(onClick = onLike) {
+                        Text(
+                            text = if (post.isLiked) "❤️ ${post.likes}" else "🤍 ${post.likes}",
+                            fontSize = 16.sp
+                        )
+                    }
+                    TextButton(onClick = { showComments = !showComments }) {
+                        Text("💬 ${post.comments.size}", fontSize = 16.sp)
+                    }
+                }
+            }
+
+            if (showComments) {
+                Divider(color = Color.LightGray, thickness = 1.dp)
+                Column(Modifier.padding(top = 8.dp)) {
+                    post.comments.forEach { Text("• $it") }
+
+                    OutlinedTextField(
+                        value = commentText,
+                        onValueChange = { commentText = it },
+                        placeholder = { Text("댓글 입력...") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            if (commentText.isNotBlank()) {
+                                onAddComment(commentText)
+                                commentText = ""
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("등록")
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun WritePostDialog(onDismiss: () -> Unit, onPost: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (text.isNotBlank()) onPost(text)
+                }
+            ) { Text("등록") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        },
+        title = { Text("게시글 작성") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("내용을 입력하세요...") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    )
 }
 
 
