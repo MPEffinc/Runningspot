@@ -12,32 +12,15 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import com.kakao.vectormap.KakaoMap
-import com.kakao.vectormap.KakaoMapReadyCallback
-import com.kakao.vectormap.LatLng
-import com.kakao.vectormap.MapLifeCycleCallback
-import com.kakao.vectormap.MapView
+import com.example.runningspot.R
+import com.google.android.gms.location.*
+import com.kakao.vectormap.*
 import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
-import com.kakao.vectormap.route.RouteLine
-import com.kakao.vectormap.route.RouteLineManager
-import com.kakao.vectormap.route.RouteLineOptions
-import com.kakao.vectormap.route.RouteLineSegment
-import com.kakao.vectormap.route.RouteLineStyle
-import com.kakao.vectormap.route.RouteLineStyles
-import kotlin.math.asin
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
+import com.kakao.vectormap.route.*
+import kotlin.math.*
 
 class RunningActivity : ComponentActivity() {
 
@@ -243,10 +226,6 @@ class RunningActivity : ComponentActivity() {
 
         // 결과 경로를 Intent로 반환
         val intent = Intent()
-
-        intent.putExtra("runningDistance", totalDistance)
-        intent.putExtra("runningTime", SystemClock.elapsedRealtime() - startTime)
-
         intent.putExtra("pathSize", runningPath.size)
         runningPath.forEachIndexed { i, latLng ->
             intent.putExtra("lat_$i", latLng.latitude)
