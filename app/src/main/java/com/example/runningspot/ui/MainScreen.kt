@@ -3,8 +3,12 @@ package com.example.runningspot.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,19 +29,29 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import com.kakao.vectormap.*
 import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
-import com.kakao.vectormap.label.LabelTextBuilder
-import kotlinx.coroutines.launch
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.integerArrayResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
+import com.example.runningspot.CommunityActivity
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
 import com.example.runningspot.R
@@ -48,8 +62,10 @@ import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
-
-
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlin.String
+import kotlin.jvm.java
 @Composable
 fun MainScreen(
     userName: String?,
@@ -69,7 +85,7 @@ fun MainScreen(
             0 -> InfoScreen(padding)
             1 -> StatsScreen(padding)
             2 -> runningScreen.value.invoke(padding)
-            3 -> CommunityScreen(padding)
+            3 -> CommunityScreen(padding,userName)
             4 -> MyPageScreen(
                 padding = padding,
                 userName = userName,
@@ -431,31 +447,185 @@ fun StatsScreen(padding: PaddingValues) {
 }
 
 @Composable
-fun CommunityScreen(padding: PaddingValues) {
-    LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+fun CommunityScreen(padding: PaddingValues, userName: String?) {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
+
+    // 새로고침 트리거용 키
+    var refreshKey by remember { mutableStateOf(0) }
+
+    // posts: 새로고침 시마다 다시 로드
+    val posts by remember(refreshKey) {
+        mutableStateOf<List<Post>>(loadPosts(prefs))
+    }
+
+    // Lifecycle 감지해서 onResume 시 자동 새로고침
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshKey++ // 돌아올 때마다 posts 다시 불러오기
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // UI
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
     ) {
-        items(3) { i ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(4.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("사용자 ${i + 1}의 러닝 후기", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("오늘 ${4 + i}km 뛰었어요! 상쾌한 날씨 ☀️")
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("❤️ ${10 + i}")
-                        Text("💬 ${2 + i}")
+        // 게시글 리스트
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(posts, key = { it.id }) { post ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val intent = Intent(context, CommunityActivity::class.java)
+                            intent.putExtra("postId", post.id)
+                            intent.putExtra("title", post.title)
+                            intent.putExtra("authorName", post.authorName)
+                            intent.putExtra("content", post.content)
+                            intent.putExtra("likes", post.likes)
+                            intent.putExtra("comments", post.comments)
+                            intent.putExtra("imageRes", post.imageRes)
+                            intent.putExtra("userName", userName)
+                            intent.putExtra("imageUri", post.imageUri)
+                            context.startActivity(intent)
+                        },
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // ✅ 이미지가 있을 경우 표시
+                        if (post.imageUri?.isNotBlank() == true) {
+                            Image(
+                                painter = rememberAsyncImagePainter(Uri.parse(post.imageUri)),
+                                contentDescription = "게시글 이미지",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .padding(vertical = 8.dp)
+                            )
+                        } else {
+                            // 기본 이미지 리소스 (없을 경우)
+                            Image(
+                                painter = painterResource(id = post.imageRes),
+                                contentDescription = "기본 이미지",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .padding(vertical = 8.dp)
+                            )
+                        }
+
+                        Text(post.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(post.content, fontSize = 15.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(" ${post.likes}   💬 ${post.comments}")
                     }
                 }
             }
         }
+
+        // ✅ 오른쪽 하단의 + 버튼
+        FloatingActionButton(
+            onClick = {
+                val intent = Intent(context, CommunityActivity::class.java)
+                intent.putExtra("userName", userName)
+                intent.putExtra("isWriteMode", true)
+                context.startActivity(intent)
+            },
+            containerColor = MaterialTheme.colorScheme.primary,
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(20.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "게시글 추가",
+                tint = Color.White
+            )
+        }
     }
 }
+fun loadPosts(prefs: SharedPreferences): List<Post> {
+    fun getSavedLikes(postId: Int) = prefs.getInt("likes_$postId", 0)
+    fun getSavedComments(postId: Int) = prefs.getInt("comments_$postId", 0)
 
+    val defaultPosts = listOf(
+        Post(
+            id = 1,
+            title = "옛날 생각이 나는 러닝루트",
+            authorName = "김민주",
+            content = "오늘 4km 뛰었어요! 상쾌한 날씨 🌞",
+            likes = getSavedLikes(1),
+            comments = getSavedComments(1),
+            imageRes = R.drawable.jeju
+        ),
+        Post(
+            id = 2,
+            title = "도심 속 러닝 코스 추천",
+            authorName = "정민석",
+            content = "오늘 5km 뛰었어요! 시원한 바람 🍃",
+            likes = getSavedLikes(2),
+            comments = getSavedComments(2),
+            imageRes = R.drawable.busan
+        ),
+        Post(
+            id = 3,
+            title = "겨울 러닝도 즐겁게!",
+            authorName = "남가을",
+            content = "오늘 6km 뛰었어요! 하늘이 맑아요 🌤",
+            likes = getSavedLikes(3),
+            comments = getSavedComments(3),
+            imageRes = R.drawable.sea
+        )
+    )
+
+    // 저장된 사용자 게시글 불러오기
+    val savedJson = prefs.getString("user_posts", "[]")
+    val jsonArray = JSONArray(savedJson)
+    val newPosts = List(jsonArray.length()) { i ->
+        val obj = jsonArray.getJSONObject(i)
+        val hashtagsString = obj.optString("hashtags", "")
+        val hashtags = hashtagsString.split(",").map { it.trim().removePrefix("#") }
+        Post(
+            id = obj.getInt("id"),
+            title = obj.optString("title", "제목 없음"),
+            authorName = obj.optString("author", "익명"),
+            content = obj.optString("content", ""),
+            likes = getSavedLikes(obj.getInt("id")),
+            comments = getSavedComments(obj.getInt("id")),
+            imageRes = R.drawable.sea,
+            imageUri = obj.optString("imageUri", null),
+        )
+    }
+
+    return defaultPosts + newPosts
+}
+
+data class Post(
+    val title: String,
+    val id: Int,
+    val authorName: String,
+    val content: String,
+    var likes: Int = 0,
+    var comments: Int = 0,
+    val imageRes: Int,
+    val imageUri: String? = null,
+)
 
 @Composable
 fun MyPageScreen(
