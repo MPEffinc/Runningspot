@@ -38,12 +38,12 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakao761f8d0c71257bbbcebf7f4b89082f9f" android:host="oauth"/>
+                <data android:scheme="kakao4a0414c61069e75577764b8ea65c26e9" android:host="oauth"/>
             </intent-filter>
         </activity>
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
-            android:value="761f8d0c71257bbbcebf7f4b89082f9f" />
+            android:value="4a0414c61069e75577764b8ea65c26e9" />
     </application>
 
 </manifest>
