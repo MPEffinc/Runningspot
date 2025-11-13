@@ -11,19 +11,26 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -32,8 +39,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
+import com.example.runningspot.ui.Post
+import com.example.runningspot.ui.loadPosts
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.run
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -201,111 +211,141 @@ fun CommunityDetailScreen(
     var commentList by remember { mutableStateOf(loadComments(prefs, postId)) }
     var newComment by remember { mutableStateOf("") }
 
-    fun addComment(comment: String) {
-        commentList = commentList + (userName to comment)
-        saveComments(prefs, postId, commentList)
-        onUpdateStats(likes, commentList.size)
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title) },
-                actions = {
-                    if (authorName == userName) {
-                        IconButton(onClick = {
-                            val jsonArray = JSONArray(prefs.getString("user_posts", "[]"))
-                            val newArray = JSONArray()
-                            for (i in 0 until jsonArray.length()) {
-                                val obj = jsonArray.getJSONObject(i)
-                                if (obj.getInt("id") != postId) newArray.put(obj)
-                            }
-                            prefs.edit().putString("user_posts", newArray.toString()).apply()
-                            (context as? Activity)?.finish()
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "게시글 삭제",
-                                tint = Color.Red
-                            )
-                        }
-                    }
-                }
+                title = { Text("커뮤니티", fontSize = 20.sp) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         }
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 16.dp)
+                .fillMaxSize()
         ) {
-            // 해시태그
-            if (hashtags.isNotEmpty()) {
-                Row(
+
+            //  이미지 (그대로 유지)
+            if (imageUri?.isNotBlank() == true) {
+                Image(
+                    painter = rememberAsyncImagePainter(Uri.parse(imageUri)),
+                    contentDescription = null,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 8.dp, bottom = 8.dp), // 왼쪽에 여백 추가
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(20.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = imageRes),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(20.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            //  본문
+            Text(
+                content,
+                fontSize = 16.sp,
+                lineHeight = 23.sp,
+                color = Color(0xFF222222)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+
+            // 거리 + 페이스
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFEDE7F6)) // 연보라
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("거리 7.2km", fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3C96))
+                Text("페이스 5'10''/km", fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3C96))
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // 좋아요 / 댓글 아이콘
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    hashtags.forEach { tag ->
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("#$tag") },
-                            colors = AssistChipDefaults.assistChipColors(
-                                containerColor = Color(0xFFE3F2FD)
-                            )
+                    IconButton(
+                        onClick = {
+                            liked = !liked
+                            likes = if (liked) likes + 1 else maxOf(likes - 1, 0)
+                            prefs.edit().putInt("likes_$postId", likes).apply()
+                            onUpdateStats(likes, commentList.size)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = null,
+                            tint = if (liked) Color.Red else Color.LightGray,
+                            modifier = Modifier.size(20.dp)
                         )
+                    }
+                    Text("$likes", fontSize = 15.sp)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = Color(0xFF8E7CC3),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text("${commentList.size}", fontSize = 15.sp)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            //댓글 전체 표시 (작성자 + 내용)
+            if (commentList.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    commentList.forEach { (writer, comment) ->
+                        Column {
+                            Text(
+                                text = writer,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF6C4CD3),
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = comment,
+                                fontSize = 15.sp,
+                                color = Color.DarkGray
+                            )
+                        }
                     }
                 }
             }
 
-            //이미지
-            imageUri?.let {
-                if (it.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    Image(
-                        painter = rememberAsyncImagePainter(Uri.parse(it)),
-                        contentDescription = "첨부 이미지",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp)
-                    )
-                }
-            } ?: run {
-                if (imageRes != 0) {
-                    Spacer(Modifier.height(10.dp))
-                    Image(
-                        painter = painterResource(id = imageRes),
-                        contentDescription = "기본 이미지",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp)
-                    )
-                }
-            }
+            Spacer(Modifier.height(20.dp))
 
-            Spacer(Modifier.height(10.dp))
-            Text(content, fontSize = 16.sp)
-
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = {
-                    liked = !liked
-                    likes = if (liked) likes + 1 else maxOf(likes - 1, 0)
-                    prefs.edit().putInt("likes_$postId", likes).apply()
-                    onUpdateStats(likes, commentList.size)
-                }) {
-                    Icon(
-                        imageVector = Icons.Filled.Favorite,
-                        contentDescription = "좋아요",
-                        tint = if (liked) Color.Red else Color.LightGray
-                    )
-                }
-                Text("$likes   💬 ${commentList.size}")
-            }
-
+            //댓글 입력창
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -313,83 +353,116 @@ fun CommunityDetailScreen(
                 OutlinedTextField(
                     value = newComment,
                     onValueChange = { newComment = it },
-                    placeholder = { Text("댓글을 입력하세요...") },
-                    modifier = Modifier.weight(1f)
+                    placeholder = { Text("댓글을 입력하세요") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp),
+                    shape = RoundedCornerShape(12.dp)
                 )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = {
-                    if (newComment.isNotBlank()) {
-                        addComment(newComment)
-                        newComment = ""
-                    }
-                }) {
-                    Text("댓글 추가")
-                }
-            }
 
-            Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.width(10.dp))
 
-            if (commentList.isNotEmpty()) {
-                Text("댓글 (${commentList.size})", fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    commentList.forEachIndexed { index, (writer, comment) ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            elevation = CardDefaults.cardElevation(2.dp)
-                        ) {
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(writer, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    Text(comment)
-                                }
-                                if (writer == userName) {
-                                    IconButton(onClick = {
-                                        commentList = commentList.toMutableList().also { it.removeAt(index) }
-                                        saveComments(prefs, postId, commentList)
-                                        onUpdateStats(likes, commentList.size)
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "댓글 삭제", tint = Color.Gray)
-                                    }
-                                }
-                            }
+                Button(
+                    onClick = {
+                        if (newComment.isNotBlank()) {
+                            commentList = commentList + (userName to newComment)
+                            saveComments(prefs, postId, commentList)
+                            newComment = ""
+                            onUpdateStats(likes, commentList.size)
                         }
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C4CD3)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.height(54.dp)
+                ) {
+                    Text("등록", fontSize = 15.sp)
                 }
-            } else {
-                Text("아직 댓글이 없습니다.")
             }
         }
     }
 }
 
-fun saveComments(prefs: SharedPreferences, postId: Int, comments: List<Pair<String, String>>) {
-    val json = JSONArray().apply {
-        comments.forEach { (writer, text) ->
-            put(JSONObject().apply {
-                put("writer", writer)
-                put("text", text)
-            })
+    fun saveComments(prefs: SharedPreferences, postId: Int, comments: List<Pair<String, String>>) {
+        val json = JSONArray().apply {
+            comments.forEach { (writer, text) ->
+                put(JSONObject().apply {
+                    put("writer", writer)
+                    put("text", text)
+                })
+            }
+        }
+        prefs.edit().putString("comments_json_$postId", json.toString()).apply()
+    }
+
+    fun loadComments(prefs: SharedPreferences, postId: Int): List<Pair<String, String>> {
+        val jsonString = prefs.getString("comments_json_$postId", null) ?: return emptyList()
+        return try {
+            val jsonArray = JSONArray(jsonString)
+            List(jsonArray.length()) { i ->
+                val obj = jsonArray.getJSONObject(i)
+                obj.getString("writer") to obj.getString("text")
+            }
+        } catch (e: Exception) {
+            emptyList()
         }
     }
-    prefs.edit().putString("comments_json_$postId", json.toString()).apply()
-}
 
-fun loadComments(prefs: SharedPreferences, postId: Int): List<Pair<String, String>> {
-    val jsonString = prefs.getString("comments_json_$postId", null) ?: return emptyList()
-    return try {
-        val jsonArray = JSONArray(jsonString)
-        List(jsonArray.length()) { i ->
-            val obj = jsonArray.getJSONObject(i)
-            obj.getString("writer") to obj.getString("text")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CrewDetailScreen(
+    crewName: String,
+    crewLocation: String,
+    crewDescription: String
+) {
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(crewName, fontSize = 20.sp) }
+            )
         }
-    } catch (e: Exception) {
-        emptyList()
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(20.dp)
+                .fillMaxSize()
+        ) {
+
+            Text(
+                text = crewName,
+                fontWeight = FontWeight.Bold,
+                fontSize = 24.sp
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                text = crewLocation,
+                fontSize = 15.sp,
+                color = Color.Gray
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Text(
+                text = crewDescription,
+                fontSize = 16.sp,
+                lineHeight = 22.sp
+            )
+
+            Spacer(Modifier.height(40.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFFEFEFEF)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("크루 상세 화면 준비 중!", color = Color.Gray)
+            }
+        }
     }
 }

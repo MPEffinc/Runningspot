@@ -40,8 +40,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.integerArrayResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +70,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.String
 import kotlin.jvm.java
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.runningspot.loadComments
+
 @Composable
 fun MainScreen(
     userName: String?,
@@ -446,99 +454,271 @@ fun StatsScreen(padding: PaddingValues) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommunityScreen(padding: PaddingValues, userName: String?) {
+
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
 
-    // 새로고침 트리거용 키
     var refreshKey by remember { mutableStateOf(0) }
+    val posts by remember(refreshKey) { mutableStateOf(loadPosts(prefs)) }
 
-    // posts: 새로고침 시마다 다시 로드
-    val posts by remember(refreshKey) {
-        mutableStateOf<List<Post>>(loadPosts(prefs))
-    }
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabTitles = listOf("커뮤니티", "크루")
 
-    // Lifecycle 감지해서 onResume 시 자동 새로고침
+    // 돌아올 때 새로고침
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                refreshKey++ // 돌아올 때마다 posts 다시 불러오기
-            }
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshKey++
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
+    val crewList = listOf(
+        Crew(
+            id = 1,
+            name = "Crew Momentum",
+            location = "Songpa-dong, Incheon",
+            description = "Momentum 팀 모임에서 같이 뛰실 분들을 모집합니다! 인천팀 실력이 아니더라도 환영! 저녁에 함께 달리고 싶으신 분들 위주!",
+            likes = 3,
+            comments = 12,
+            profileRes = R.drawable.tom1
+        ),
+        Crew(
+            id = 2,
+            name = "주호준",
+            location = "Songpa-dong, Incheon",
+            description = "Shirokuro 출신! 8시 운동 세트도 바쁘고 같이 뛰실 분도 없나요? 초보 환영! 저도 초보입니다.",
+            likes = 1,
+            comments = 2,
+            profileRes = R.drawable.tom2
+        ),
+        Crew(
+            id = 3,
+            name = "Crew UNiverse",
+            location = "Songpa-dong, Incheon",
+            description = "UNiverse 러닝 좋아하시는 분들 모이세요! 너무 쉬운 샌티드 코스 준비완료!",
+            likes = 4,
+            comments = 10,
+            profileRes = R.drawable.tom3
+        )
+    )
 
-    // UI
+    // 전체 화면
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
     ) {
-        // 게시글 리스트
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(posts, key = { it.id }) { post ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            val intent = Intent(context, CommunityActivity::class.java)
-                            intent.putExtra("postId", post.id)
-                            intent.putExtra("title", post.title)
-                            intent.putExtra("authorName", post.authorName)
-                            intent.putExtra("content", post.content)
-                            intent.putExtra("likes", post.likes)
-                            intent.putExtra("comments", post.comments)
-                            intent.putExtra("imageRes", post.imageRes)
-                            intent.putExtra("userName", userName)
-                            intent.putExtra("imageUri", post.imageUri)
-                            context.startActivity(intent)
-                        },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        // ✅ 이미지가 있을 경우 표시
-                        if (post.imageUri?.isNotBlank() == true) {
-                            Image(
-                                painter = rememberAsyncImagePainter(Uri.parse(post.imageUri)),
-                                contentDescription = "게시글 이미지",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .padding(vertical = 8.dp)
-                            )
-                        } else {
-                            // 기본 이미지 리소스 (없을 경우)
-                            Image(
-                                painter = painterResource(id = post.imageRes),
-                                contentDescription = "기본 이미지",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .padding(vertical = 8.dp)
+
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            // 탭
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color(0xFFF7F4FF),
+                indicator = { tabPos ->
+                    TabRowDefaults.Indicator(
+                        modifier = Modifier
+                            .tabIndicatorOffset(tabPos[selectedTab])
+                            .height(3.dp),
+                        color = Color(0xFF6C4CD3)
+                    )
+                }
+            ) {
+                tabTitles.forEachIndexed { i, title ->
+                    Tab(
+                        selected = selectedTab == i,
+                        onClick = { selectedTab = i },
+                        text = {
+                            Text(
+                                text = title,
+                                fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedTab == i) Color(0xFF6C4CD3) else Color.Gray
                             )
                         }
+                    )
+                }
+            }
 
-                        Text(post.title, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Spacer(Modifier.height(6.dp))
-                        Text(post.content, fontSize = 15.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(" ${post.likes}   💬 ${post.comments}")
+            Spacer(Modifier.height(12.dp))
+
+            // 크루 탭
+            if (selectedTab == 1) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    items(crewList) { crew ->
+                        CrewCard(crew = crew) {
+                            val intent = Intent(context, CommunityActivity::class.java)
+                            intent.putExtra("crewName", crew.name)
+                            context.startActivity(intent)
+                        }
+                    }
+                }
+            } else {
+
+                // 커뮤니티 탭 리스트
+                LazyColumn(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    items(posts, key = { it.id }) { post ->
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val intent = Intent(context, CommunityActivity::class.java)
+                                    intent.putExtra("postId", post.id)
+                                    intent.putExtra("title", post.title)
+                                    intent.putExtra("authorName", post.authorName)
+                                    intent.putExtra("content", post.content)
+                                    intent.putExtra("likes", post.likes)
+                                    intent.putExtra("comments", post.comments)
+                                    intent.putExtra("imageRes", post.imageRes)
+                                    intent.putExtra("userName", userName)
+                                    intent.putExtra("imageUri", post.imageUri)
+                                    context.startActivity(intent)
+                                },
+                            shape = RoundedCornerShape(18.dp),
+                            elevation = CardDefaults.cardElevation(4.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF7F4FF))
+                        ) {
+
+                            Column(modifier = Modifier.padding(16.dp)) {
+
+                                // ----- 이미지 -----
+                                if (post.imageUri?.isNotBlank() == true) {
+                                    Image(
+                                        painter = rememberAsyncImagePainter(Uri.parse(post.imageUri)),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 20.dp, bottom = 20.dp)
+                                            .padding(horizontal = 20.dp)
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(14.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Image(
+                                        painter = painterResource(id = post.imageRes),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 20.dp, bottom = 20.dp)
+                                            .padding(horizontal = 20.dp)
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(14.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                //작성자 이름 (작은 폰트)
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = post.authorName,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF222222),
+                                    fontWeight = FontWeight.Medium
+                                )
+
+                                Spacer(Modifier.height(4.dp))
+
+                                // 제목
+                                Text(
+                                    post.title,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF3C2A7D)
+                                )
+
+                                Spacer(Modifier.height(6.dp))
+
+                                // 본문
+                                Text(
+                                    post.content,
+                                    fontSize = 15.sp,
+                                    color = Color.DarkGray,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                Spacer(Modifier.height(12.dp))
+
+                                // ----- 거리 / 페이스 UI -----
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFFEDE7F6))
+                                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("거리 7.2km", fontWeight = FontWeight.SemiBold)
+                                    Text("페이스 5'10''/km", fontWeight = FontWeight.SemiBold)
+                                }
+
+                                Spacer(Modifier.height(12.dp))
+
+                                // ----- 좋아요 & 댓글 -----
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Favorite,
+                                            contentDescription = null,
+                                            tint = Color(0xFFE57373)
+                                        )
+                                        Text("${post.likes}", fontSize = 15.sp)
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ChatBubbleOutline,
+                                            contentDescription = null,
+                                            tint = Color(0xFF7986CB)
+                                        )
+                                        Text("${post.comments}", fontSize = 15.sp)
+                                    }
+                                }
+
+                                Spacer(Modifier.height(12.dp))
+
+                                val previewComments =
+                                    loadComments(prefs, post.id).take(2)
+
+                                if (previewComments.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        previewComments.forEach { (_, comment) ->
+                                            Text("• $comment", color = Color.DarkGray)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // ✅ 오른쪽 하단의 + 버튼
+        // FAB
         FloatingActionButton(
             onClick = {
                 val intent = Intent(context, CommunityActivity::class.java)
@@ -546,17 +726,88 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                 intent.putExtra("isWriteMode", true)
                 context.startActivity(intent)
             },
-            containerColor = MaterialTheme.colorScheme.primary,
+            containerColor = Color(0xFF6C4CD3),
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(20.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "게시글 추가",
-                tint = Color.White
+            Icon(Icons.Default.Add, contentDescription = "추가", tint = Color.White)
+        }
+    }
+}
+@Composable
+fun CrewCard(crew: Crew, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp)) {
+
+            // 프로필 원형 이미지
+            Image(
+                painter = painterResource(id = crew.profileRes),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(55.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
             )
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+
+                Text(
+                    crew.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF222222)
+                )
+
+                Text(
+                    crew.location,
+                    fontSize = 13.sp,
+                    color = Color.Gray
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    crew.description,
+                    fontSize = 14.sp,
+                    color = Color.DarkGray,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = null,
+                            tint = Color(0xFFE57373)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("${crew.likes}")
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = Color(0xFF7986CB)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("${crew.comments}")
+                    }
+                }
+            }
         }
     }
 }
@@ -616,6 +867,15 @@ fun loadPosts(prefs: SharedPreferences): List<Post> {
     return defaultPosts + newPosts
 }
 
+data class Crew(
+    val id: Int,
+    val name: String,
+    val location: String,
+    val description: String,
+    val likes: Int,
+    val comments: Int,
+    val profileRes: Int
+)
 data class Post(
     val title: String,
     val id: Int,
