@@ -151,6 +151,34 @@ private fun loadRunPathFile(ctx: android.content.Context, fileName: String): Lis
     }
 }
 
+// 기록 삭제
+private fun deleteRunSummaryRef(ctx: android.content.Context, target: RunSummaryRef) {
+    val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
+    val arr = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
+    val newArr = org.json.JSONArray()
+
+    for (i in 0 until arr.length()) {
+        val o = arr.getJSONObject(i)
+        // endAt 으로 동일 기록 찾기
+        val endAt = o.optLong("endAt", 0L)
+        if (endAt != target.endAt) {
+            newArr.put(o)
+        }
+    }
+
+    sp.edit().putString(RUN_KEY, newArr.toString()).apply()
+
+    // 경로 파일도 같이 삭제
+    if (target.fileName.isNotBlank()) {
+        val dir = java.io.File(ctx.filesDir, "runs")
+        val f = java.io.File(dir, target.fileName)
+        if (f.exists()) {
+            f.delete()
+        }
+    }
+}
+
+
 
 @Composable
 fun MainScreen(
@@ -199,6 +227,24 @@ fun MainScreen(
                         lastDuration = r.durationMs
                         lastPath = loadRunPathFile(context, r.fileName)
                         showHistory = false
+                    },
+                    onDelete = { r ->
+                        // 1) 저장소에서 삭제
+                        deleteRunSummaryRef(context, r)
+                        // 2) 메모리 목록에서 삭제
+                        runRefs.remove(r)
+
+                        // 3) 통계 화면에 보여줄 마지막 기록 갱신
+                        if (runRefs.isNotEmpty()) {
+                            val first = runRefs.first()
+                            lastDistance = first.distanceM
+                            lastDuration = first.durationMs
+                            lastPath = loadRunPathFile(context, first.fileName)
+                        } else {
+                            lastDistance = null
+                            lastDuration = null
+                            lastPath = emptyList()
+                        }
                     }
                 )
             } else {
@@ -588,6 +634,7 @@ fun StatsScreen(
         Modifier.fillMaxSize().padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(Modifier.height(30.dp))
         Text("📊 러닝 통계", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
 
@@ -626,9 +673,11 @@ fun StatsScreen(
                 Text(kcalText, fontWeight = FontWeight.Bold)
             }
         }
-    }
 
-    Button(onClick = onShowHistory) { Text("기록 보기") }
+        Spacer(Modifier.height(30.dp))
+
+        Button(onClick = onShowHistory) { Text("기록 보기") }
+    }
 }
 
 @Composable
@@ -843,7 +892,8 @@ private fun HistoryList(
     padding: PaddingValues,
     runs: List<RunSummaryRef>,
     onBack: () -> Unit = {},
-    onSelect: (RunSummaryRef) -> Unit = {}
+    onSelect: (RunSummaryRef) -> Unit = {},
+    onDelete: (RunSummaryRef) -> Unit = {}
 ) {
     Column(
         Modifier.fillMaxSize().padding(padding).padding(12.dp)
@@ -859,24 +909,76 @@ private fun HistoryList(
         }
         Spacer(Modifier.height(12.dp))
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(runs.size) { idx ->
-                val r = runs[idx]
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelect(r) },
-                    elevation = CardDefaults.cardElevation(2.dp)
+        val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
+        val totalDurationMs = runs.sumOf { it.durationMs }
+
+        if (runs.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp)
                 ) {
-                    Column(Modifier.padding(12.dp)) {
-                        val distanceKm = r.distanceM / 1000.0
-                        val pace = calcPace(r.distanceM, r.durationMs)?.let { formatPace(it) } ?: "--"
-                        Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
+                    Text("요약", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("총 러닝 횟수: ${runs.size}회")
+                    Text("총 거리: ${"%.1f".format(totalDistanceKm)} km")
+                    Text("총 시간: ${formatDuration(totalDurationMs)}")
+                }
+            }
+        }
+
+        if (runs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "아직 저장된 러닝 기록이 없어요.\n첫 러닝을 시작해 보세요!",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(runs.size) { idx ->
+                    val r = runs[idx]
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(r) },
+                        elevation = CardDefaults.cardElevation(2.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.align(Alignment.TopStart)
+                            ) {
+                                val distanceKm = r.distanceM / 1000.0
+                                val pace =
+                                    calcPace(r.distanceM, r.durationMs)?.let { formatPace(it) }
+                                        ?: "--"
+
+                                Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(4.dp))
+                                Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
+                            }
+                            Text(
+                                text = "삭제",
+                                color = Color.Red,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .clickable { onDelete(r) }
+                            )
+                        }
                     }
                 }
             }
