@@ -1,8 +1,7 @@
-package com.example.runningspot.ui
+package com.example.runningspot.ui.components
 
 import android.app.Activity
-import android.content.Intent
-import android.net.Uri
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,10 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
-import com.google.android.gms.auth.api.signin.*
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.common.api.ApiException
 import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.user.UserApiClient
@@ -79,10 +76,10 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             onLoginSuccess(nickname, profileUrl, provider!!)      // ✅ 메인으로 전환
         } catch (e: ApiException) {
             // 상태코드로 원인 파악: 10(DEVELOPER_ERROR/SHA1 미등록), 12500(설정 이슈), 7(네트워크)
-            android.util.Log.e("GOOGLE", "signIn failed code=${e.statusCode}", e)
+            Log.e("GOOGLE", "signIn failed code=${e.statusCode}", e)
             Toast.makeText(context, "구글 로그인 실패(${e.statusCode})", Toast.LENGTH_SHORT).show()
         } catch (t: Throwable) {
-            android.util.Log.e("GOOGLE", "signIn failed", t)
+            Log.e("GOOGLE", "signIn failed", t)
             Toast.makeText(context, "구글 로그인 실패", Toast.LENGTH_SHORT).show()
         }
     }
@@ -95,12 +92,12 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
         }
         val callback: (OAuthToken?, Throwable?) -> Unit = { token, error ->
             if (error != null) {
-                android.util.Log.e("KAKAO", "login failed", error)
+                Log.e("KAKAO", "login failed", error)
                 Toast.makeText(context, "카카오 로그인 실패", Toast.LENGTH_SHORT).show()
             } else if (token != null) {
                 UserApiClient.instance.me { user, err ->
                     if (err != null || user == null) {
-                        android.util.Log.e("KAKAO", "user info failed", err)
+                        Log.e("KAKAO", "user info failed", err)
                         Toast.makeText(context, "카카오 사용자 정보 조회 실패", Toast.LENGTH_SHORT).show()
                     } else {
                         nickname = user.kakaoAccount?.profile?.nickname

@@ -1,6 +1,7 @@
 package com.example.runningspot.ui
 
 import android.Manifest
+import android.R.attr.title
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
@@ -8,58 +9,100 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Looper
+import android.util.Log
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import com.example.runningspot.ui.components.BottomNavBar
-import com.google.android.gms.location.*
-import com.google.android.gms.tasks.CancellationTokenSource
-import com.kakao.vectormap.*
-import com.kakao.vectormap.camera.CameraUpdateFactory
-import com.kakao.vectormap.label.LabelOptions
-import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.AutofillType
+import androidx.compose.ui.autofill.ContentType.Companion.Username
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.integerArrayResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.CommunityActivity
-import com.kakao.vectormap.label.LabelStyle
-import com.kakao.vectormap.label.LabelStyles
 import com.example.runningspot.R
 import com.example.runningspot.RunningActivity
+import com.example.runningspot.loadComments
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.kakao.vectormap.KakaoMap
+import com.kakao.vectormap.KakaoMapReadyCallback
+import com.kakao.vectormap.LatLng
+import com.kakao.vectormap.MapLifeCycleCallback
+import com.kakao.vectormap.MapView
+import com.kakao.vectormap.camera.CameraUpdateFactory
+import com.kakao.vectormap.label.LabelOptions
+import com.kakao.vectormap.label.LabelStyle
+import com.kakao.vectormap.label.LabelStyles
 import com.kakao.vectormap.route.RouteLine
 import com.kakao.vectormap.route.RouteLineManager
 import com.kakao.vectormap.route.RouteLineOptions
@@ -67,12 +110,105 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import org.json.JSONArray
+import com.example.runningspot.ui.components.BottomNavBar
+import kotlinx.serialization.json.JsonNull.content
 import org.json.JSONObject
-import kotlin.String
-import kotlin.jvm.java
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.ui.text.style.TextOverflow
-import com.example.runningspot.loadComments
+
+// ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
+private const val RUN_SP = "run_pref"
+private const val RUN_KEY = "runs_json"
+
+private data class RunSummaryRef(
+    val distanceM: Double,
+    val durationMs: Long,
+    val endAt: Long,
+    val fileName: String // 내부 저장소에 저장된 경로 파일명
+)
+
+private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef, maxKeep: Int = 200) {
+    val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
+    val old = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
+    val arr = org.json.JSONArray().apply {
+        put(org.json.JSONObject().apply {
+            put("distanceM", item.distanceM)
+            put("durationMs", item.durationMs)
+            put("endAt", item.endAt)
+            put("fileName", item.fileName)
+        })
+        for (i in 0 until kotlin.math.min(old.length(), maxKeep - 1)) put(old.getJSONObject(i))
+    }
+    sp.edit().putString(RUN_KEY, arr.toString()).apply()
+}
+
+private fun loadRunSummaryRefs(ctx: android.content.Context): List<RunSummaryRef> {
+    val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
+    val arr = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
+    return buildList {
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            add(
+                RunSummaryRef(
+                    distanceM = o.optDouble("distanceM", 0.0),
+                    durationMs = o.optLong("durationMs", 0L),
+                    endAt = o.optLong("endAt", 0L),
+                    fileName = o.optString("fileName", "")
+                )
+            )
+        }
+    }
+}
+
+private fun saveRunPathFile(ctx: android.content.Context, endAt: Long, path: List<Pair<Double, Double>>): String {
+    val dir = java.io.File(ctx.filesDir, "runs").apply { mkdirs() }
+    val name = "run_${endAt}.json"
+    val file = java.io.File(dir, name)
+    val arr = org.json.JSONArray()
+    path.forEach { (lat, lng) -> arr.put(org.json.JSONObject().apply { put("lat", lat); put("lng", lng) }) }
+    file.writeText(arr.toString())
+    return name
+}
+
+private fun loadRunPathFile(ctx: android.content.Context, fileName: String): List<Pair<Double, Double>> {
+    if (fileName.isBlank()) return emptyList()
+    val file = java.io.File(java.io.File(ctx.filesDir, "runs"), fileName)
+    if (!file.exists()) return emptyList()
+    val arr = org.json.JSONArray(file.readText())
+    return buildList {
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            add(o.optDouble("lat") to o.optDouble("lng"))
+        }
+    }
+}
+
+// 기록 삭제
+private fun deleteRunSummaryRef(ctx: android.content.Context, target: RunSummaryRef) {
+    val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
+    val arr = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
+    val newArr = org.json.JSONArray()
+
+    for (i in 0 until arr.length()) {
+        val o = arr.getJSONObject(i)
+        // endAt 으로 동일 기록 찾기
+        val endAt = o.optLong("endAt", 0L)
+        if (endAt != target.endAt) {
+            newArr.put(o)
+        }
+    }
+
+    sp.edit().putString(RUN_KEY, newArr.toString()).apply()
+
+    // 경로 파일도 같이 삭제
+    if (target.fileName.isNotBlank()) {
+        val dir = java.io.File(ctx.filesDir, "runs")
+        val f = java.io.File(dir, target.fileName)
+        if (f.exists()) {
+            f.delete()
+        }
+    }
+}
+
+
 
 @Composable
 fun MainScreen(
@@ -83,7 +219,26 @@ fun MainScreen(
 ) {
     var selectedTab by remember { mutableStateOf(2) } // 기본 러닝 탭 선택
 
-    val runningScreen = remember { mutableStateOf<(@Composable (PaddingValues) -> Unit)>({ RunningScreen(it) }) }
+    val context = LocalContext.current
+
+// 기록/통계 상태
+    var showHistory by rememberSaveable { mutableStateOf(false) }
+    var lastDistance by rememberSaveable { mutableStateOf<Double?>(null) }
+    var lastDuration by rememberSaveable { mutableStateOf<Long?>(null) }
+    var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
+
+// 앱 시작 시 저장된 기록 읽어오기
+    LaunchedEffect(Unit) {
+        runRefs.clear()
+        runRefs.addAll(loadRunSummaryRefs(context))
+        runRefs.firstOrNull()?.let { r ->
+            lastDistance = r.distanceM
+            lastDuration = r.durationMs
+            lastPath = loadRunPathFile(context, r.fileName)
+        }
+    }
+
 
     Scaffold(
         bottomBar = { BottomNavBar(selectedTab, onTabSelected = { selectedTab = it }) }
@@ -91,9 +246,65 @@ fun MainScreen(
 
         when (selectedTab) {
             0 -> InfoScreen(padding)
-            1 -> StatsScreen(padding)
-            2 -> runningScreen.value.invoke(padding)
-            3 -> CommunityScreen(padding,userName)
+            1 -> {
+                if (showHistory) {
+                    HistoryList(
+                        padding = padding,
+                        runs = runRefs,
+                        onBack = { showHistory = false },
+                        onSelect = { r ->
+                            lastDistance = r.distanceM
+                            lastDuration = r.durationMs
+                            lastPath = loadRunPathFile(context, r.fileName)
+                            showHistory = false
+                        },
+                        onDelete = { r ->
+                            // 1) 저장소에서 삭제
+                            deleteRunSummaryRef(context, r)
+                            // 2) 메모리 목록에서 삭제
+                            runRefs.remove(r)
+
+                            // 3) 통계 화면에 보여줄 마지막 기록 갱신
+                            if (runRefs.isNotEmpty()) {
+                                val first = runRefs.first()
+                                lastDistance = first.distanceM
+                                lastDuration = first.durationMs
+                                lastPath = loadRunPathFile(context, first.fileName)
+                            } else {
+                                lastDistance = null
+                                lastDuration = null
+                                lastPath = emptyList()
+                            }
+                        }
+                    )
+                } else {
+                    StatsScreen(
+                        padding = padding,
+                        distance = lastDistance,
+                        duration = lastDuration,
+                        route = lastPath,
+                        onShowHistory = { showHistory = true }
+                    )
+                }
+            }
+            2 -> RunningScreen(
+                padding = padding,
+                onRunResult = { distance, duration, pathPairs ->
+                    val endAt = System.currentTimeMillis()
+                    // 1) 경로 파일 저장
+                    val fileName = saveRunPathFile(context, endAt, pathPairs)
+                    // 2) 요약 저장(SharedPreferences)
+                    val ref = RunSummaryRef(distance, duration, endAt, fileName)
+                    saveRunSummaryRef(context, ref)
+
+                    // 3) 메모리 목록/프리뷰 갱신
+                    runRefs.add(0, ref)
+                    lastDistance = distance
+                    lastDuration = duration
+                    lastPath = pathPairs
+                }
+            )
+            3 -> CommunityScreen(padding, userName)
             4 -> MyPageScreen(
                 padding = padding,
                 userName = userName,
@@ -106,7 +317,10 @@ fun MainScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunningScreen(padding: PaddingValues) {
+fun RunningScreen(
+    padding: PaddingValues,
+    onRunResult: (Double, Long, List<Pair<Double, Double>>) -> Unit = { _, _, _ -> }
+) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -137,7 +351,20 @@ fun RunningScreen(padding: PaddingValues) {
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val data = result.data ?: return@rememberLauncherForActivityResult
+
+            val dist = data.getDoubleExtra("runningDistance", Double.NaN)
+            val time = data.getLongExtra("runningTime", -1L)
             val size = data.getIntExtra("pathSize", 0)
+            val pathPairs = if (size > 1) {
+                (0 until size).map { i ->
+                    data.getDoubleExtra("lat_$i", 0.0) to data.getDoubleExtra("lng_$i", 0.0)
+                }
+            } else emptyList()
+
+            if (!dist.isNaN() && time >= 0) {
+                onRunResult(dist, time, pathPairs)
+            }
+
             if (size > 1) {
                 val path = (0 until size).map { i ->
                     LatLng.from(
@@ -258,7 +485,6 @@ fun RunningScreen(padding: PaddingValues) {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         Toast.makeText(context, "러닝 종료!", Toast.LENGTH_SHORT).show()
     }
-
 
     // ===== UI =====
     Box(
@@ -416,22 +642,48 @@ private fun InfoScreen(padding: PaddingValues) {
 }
 
 @Composable
-fun StatsScreen(padding: PaddingValues) {
+fun StatsScreen(
+    padding: PaddingValues,
+    distance: Double?, duration: Long?,
+    route: List<Pair<Double, Double>>,
+    onShowHistory: () -> Unit = {}
+) {
+
+    val paceText = calcPace(distance ?: 0.0, duration ?: 0L)
+        ?.let { formatPace(it) } ?: "-"
+
+    val kcalText = when {
+        distance != null && duration != null -> {
+            val kcal = calcCalories(distance)
+            "%.0f kcal".format(kcal)
+        }
+        else -> "-"
+    }
+
     Column(
         Modifier.fillMaxSize().padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(Modifier.height(30.dp))
         Text("📊 러닝 통계", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .background(Color(0xFFE0E0E0)),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text("그래프 예시 영역")
+            MapRoutePreview(
+                path = route,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+                    .background(Color(0xFFEFEFEF))
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("러닝 거리")
+            Text((distance?.let { "%.2f km".format(it / 1000.0) } ?: "-"), fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -440,17 +692,21 @@ fun StatsScreen(padding: PaddingValues) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("평균 페이스")
-                Text("5’22”/km", fontWeight = FontWeight.Bold)
+                Text(paceText, fontWeight = FontWeight.Bold)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("시간")
-                Text("27:00", fontWeight = FontWeight.Bold)
+                Text("러닝 시간")
+                Text((duration?.let { formatDuration(it) } ?: "-"), fontWeight = FontWeight.Bold)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("칼로리")
-                Text("410 kcal", fontWeight = FontWeight.Bold)
+                Text(kcalText, fontWeight = FontWeight.Bold)
             }
         }
+
+        Spacer(Modifier.height(30.dp))
+
+        Button(onClick = onShowHistory) { Text("기록 보기") }
     }
 }
 
@@ -584,6 +840,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     intent.putExtra("likes", post.likes)
                                     intent.putExtra("comments", post.comments)
                                     intent.putExtra("imageRes", post.imageRes)
+                                    intent.putExtra("distanceKm", post.distanceKm ?: Double.NaN)
+                                    intent.putExtra("durationText", post.durationText ?: "")
+                                    intent.putExtra("pace", post.pace ?: "")
+                                    intent.putExtra("calories", post.calories ?: Double.NaN)
                                     intent.putExtra("userName", userName)
                                     intent.putExtra("imageUri", post.imageUri)
                                     context.startActivity(intent)
@@ -654,16 +914,25 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                 Spacer(Modifier.height(12.dp))
 
                                 // ----- 거리 / 페이스 UI -----
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFEDE7F6))
-                                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text("거리 7.2km", fontWeight = FontWeight.SemiBold)
-                                    Text("페이스 5'10''/km", fontWeight = FontWeight.SemiBold)
+                                if (post.distanceKm != null && post.pace != null) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color(0xFFEDE7F6))
+                                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "거리 ${"%.2f".format(post.distanceKm)}km",
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            "페이스 ${post.pace}",
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(Modifier.height(12.dp))
                                 }
 
                                 Spacer(Modifier.height(12.dp))
@@ -814,13 +1083,14 @@ fun CrewCard(crew: Crew, onClick: () -> Unit) {
 fun loadPosts(prefs: SharedPreferences): List<Post> {
     fun getSavedLikes(postId: Int) = prefs.getInt("likes_$postId", 0)
     fun getSavedComments(postId: Int) = prefs.getInt("comments_$postId", 0)
-
     val defaultPosts = listOf(
         Post(
             id = 1,
             title = "옛날 생각이 나는 러닝루트",
             authorName = "김민주",
             content = "오늘 4km 뛰었어요! 상쾌한 날씨 🌞",
+            pace = "페이스 5'10''/km",
+            distanceKm = 7.2,
             likes = getSavedLikes(1),
             comments = getSavedComments(1),
             imageRes = R.drawable.jeju
@@ -830,6 +1100,8 @@ fun loadPosts(prefs: SharedPreferences): List<Post> {
             title = "도심 속 러닝 코스 추천",
             authorName = "정민석",
             content = "오늘 5km 뛰었어요! 시원한 바람 🍃",
+            pace = "페이스 2'3''/km",
+            distanceKm = 8.6,
             likes = getSavedLikes(2),
             comments = getSavedComments(2),
             imageRes = R.drawable.busan
@@ -839,6 +1111,8 @@ fun loadPosts(prefs: SharedPreferences): List<Post> {
             title = "겨울 러닝도 즐겁게!",
             authorName = "남가을",
             content = "오늘 6km 뛰었어요! 하늘이 맑아요 🌤",
+            pace = "페이스 3'5''/km",
+            distanceKm = 5.8,
             likes = getSavedLikes(3),
             comments = getSavedComments(3),
             imageRes = R.drawable.sea
@@ -850,20 +1124,24 @@ fun loadPosts(prefs: SharedPreferences): List<Post> {
     val jsonArray = JSONArray(savedJson)
     val newPosts = List(jsonArray.length()) { i ->
         val obj = jsonArray.getJSONObject(i)
-        val hashtagsString = obj.optString("hashtags", "")
-        val hashtags = hashtagsString.split(",").map { it.trim().removePrefix("#") }
+
         Post(
             id = obj.getInt("id"),
-            title = obj.optString("title", "제목 없음"),
-            authorName = obj.optString("author", "익명"),
-            content = obj.optString("content", ""),
+            title = obj.optString("title"),
+            authorName = obj.optString("author"),
+            content = obj.optString("content"),
             likes = getSavedLikes(obj.getInt("id")),
             comments = getSavedComments(obj.getInt("id")),
             imageRes = R.drawable.sea,
-            imageUri = obj.optString("imageUri", null),
+            imageUri = obj.optString("imageUri"),
+
+            // ---- 러닝 기록 불러오기 ----
+            distanceKm = obj.optDouble("distanceKm"),
+            pace = obj.optString("pace"),
+            durationText = obj.optString("durationText"),
+            calories = obj.optDouble("calories")
         )
     }
-
     return defaultPosts + newPosts
 }
 
@@ -885,6 +1163,10 @@ data class Post(
     var comments: Int = 0,
     val imageRes: Int,
     val imageUri: String? = null,
+    val distanceKm: Double? = null,
+    val pace: String? = null,
+    val durationText: String? = null,
+    val calories: Double? = null,
 )
 
 @Composable
@@ -952,4 +1234,221 @@ private fun MenuItem(text: String) {
     ) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
     }
+}
+
+// 맵 통계창 출력
+@Composable
+private fun MapRoutePreview(
+    path: List<Pair<Double, Double>>,
+    modifier: Modifier = Modifier,
+    zoomLevel: Int = 15
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    // Kakao MapView 준비
+    val mapView = remember { MapView(context) }
+    var kakaoMap by remember { mutableStateOf<KakaoMap?>(null) }
+
+    // 라이프사이클 연동
+    DisposableEffect(lifecycleOwner, mapView) {
+        val obs = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) { mapView.resume() }
+            override fun onPause(owner: LifecycleOwner) { mapView.pause() }
+            override fun onDestroy(owner: LifecycleOwner) { mapView.finish() }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            runCatching { mapView.finish() }
+        }
+    }
+
+    // 맵 준비 콜백
+    val readyCb = remember(path) {
+        object : KakaoMapReadyCallback() {
+            override fun onMapReady(map: KakaoMap) {
+                kakaoMap = map
+
+                // 경로가 있으면 폴리라인 그리기
+                if (path.size > 1) {
+                    val routePts = path.map { LatLng.from(it.first, it.second) }
+                    map.routeLineManager?.let { manager ->
+                        val layer = manager.layer
+                        val style = RouteLineStyle.from(8f, android.graphics.Color.BLUE)
+                        val styles = RouteLineStyles.from(style)
+                        val seg = RouteLineSegment.from(routePts).setStyles(styles)
+                        val options = RouteLineOptions.from(seg)
+                        layer.addRouteLine(options).show()
+                    }
+
+                    // 카메라를 경로 중앙으로 이동
+                    val avgLat = path.map { it.first }.average()
+                    val avgLng = path.map { it.second }.average()
+                    val update = CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng))
+                    map.moveCamera(update)
+                    // 필요한 경우 확대/축소 레벨 조정
+                    // map.setZoomLevel(zoomLevel) // SDK 버전에 따라 지원
+                } else {
+                    // 경로 없으면 기본 위치
+                    val center = LatLng.from(0.0, 0.0)
+                    map.moveCamera(CameraUpdateFactory.newCenterPosition(center))
+                }
+            }
+
+            override fun getPosition(): LatLng = LatLng.from(0.0, 0.0)
+            override fun getZoomLevel(): Int = zoomLevel
+        }
+    }
+
+    // 맵 시작
+    LaunchedEffect(mapView, path) {
+        mapView.start(object : MapLifeCycleCallback() {
+            override fun onMapDestroy() {}
+            override fun onMapError(error: Exception?) { error?.printStackTrace() }
+        }, readyCb)
+    }
+
+    // 실제 뷰 렌더
+    AndroidView(
+        modifier = modifier,
+        factory = { mapView }
+    )
+}
+
+
+// 시간 표시
+private fun formatDuration(ms: Long): String {
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+// 페이스 계산
+fun calcPace(distanceM: Double, durationMs: Long): Double? {
+    if (distanceM < 50.0 || durationMs < 30_000L) return null // 정확도 올리기
+    val distKm = distanceM / 1000.0
+    val sec = durationMs / 1000.0
+    if (distKm <= 0.0) return null
+    return sec / distKm
+}
+
+fun formatPace(secPerKm: Double): String {
+    val total = secPerKm.toInt()
+    val m = total / 60
+    val s = total % 60
+    return "%d’%02d”/km".format(m, s)
+}
+
+// 칼로리 계산 (기본 몸무게: 70kg)
+fun calcCalories(distanceM: Double, weightKg: Double = 70.0): Double {
+    val distKm = distanceM / 1000.0
+    return weightKg * distKm * 1.0
+}
+
+// 과거 기록 조회
+@Composable
+private fun HistoryList(
+    padding: PaddingValues,
+    runs: List<RunSummaryRef>,
+    onBack: () -> Unit = {},
+    onSelect: (RunSummaryRef) -> Unit = {},
+    onDelete: (RunSummaryRef) -> Unit = {}
+) {
+    Column(
+        Modifier.fillMaxSize().padding(padding).padding(12.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onBack) { Text("← 뒤로") }
+            Text("러닝 기록", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Spacer(Modifier.width(1.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+
+        val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
+        val totalDurationMs = runs.sumOf { it.durationMs }
+
+        if (runs.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Text("요약", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("총 러닝 횟수: ${runs.size}회")
+                    Text("총 거리: ${"%.1f".format(totalDistanceKm)} km")
+                    Text("총 시간: ${formatDuration(totalDurationMs)}")
+                }
+            }
+        }
+
+        if (runs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "아직 저장된 러닝 기록이 없어요.\n첫 러닝을 시작해 보세요!",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(runs.size) { idx ->
+                    val r = runs[idx]
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(r) },
+                        elevation = CardDefaults.cardElevation(2.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.align(Alignment.TopStart)
+                            ) {
+                                val distanceKm = r.distanceM / 1000.0
+                                val pace =
+                                    calcPace(r.distanceM, r.durationMs)?.let { formatPace(it) }
+                                        ?: "--"
+
+                                Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.height(4.dp))
+                                Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
+                            }
+                            Text(
+                                text = "삭제",
+                                color = Color.Red,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .clickable { onDelete(r) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatDate(ms: Long): String {
+    val sdf = java.text.SimpleDateFormat("yyyy.MM.dd HH:mm", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(ms))
 }

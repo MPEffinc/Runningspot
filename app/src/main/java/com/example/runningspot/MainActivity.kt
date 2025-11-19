@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import com.example.runningspot.ui.LoginScreen
+import com.example.runningspot.ui.components.LoginScreen
 import com.example.runningspot.ui.MainScreen
 
 class MainActivity : ComponentActivity() {

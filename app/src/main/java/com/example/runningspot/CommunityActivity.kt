@@ -1,17 +1,21 @@
 package com.example.runningspot
 
+import android.R.attr.duration
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -40,10 +45,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.ui.Post
+import com.example.runningspot.ui.calcCalories
+import com.example.runningspot.ui.calcPace
+import com.example.runningspot.ui.formatPace
 import com.example.runningspot.ui.loadPosts
+import okhttp3.internal.concurrent.formatDuration
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.run
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.example.runningspot.ui.MainScreen
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,7 +80,10 @@ class CommunityActivity : ComponentActivity() {
             val imageUri = intent.getStringExtra("imageUri")
             val savedLikes = prefs.getInt("likes_$postId", 0)
             val savedComments = prefs.getInt("comments_$postId", 0)
-
+            val distanceKm = intent.getDoubleExtra("distanceKm", Double.NaN).takeIf { !it.isNaN() }
+            val durationText = intent.getStringExtra("durationText")
+            val pace = intent.getStringExtra("pace")
+            val calories = intent.getDoubleExtra("calories", Double.NaN).takeIf { !it.isNaN() }
             setContent {
                 CommunityDetailScreen(
                     title = title,
@@ -81,12 +96,16 @@ class CommunityActivity : ComponentActivity() {
                     imageUri = imageUri,
                     initialLikes = savedLikes,
                     initialComments = savedComments,
+                    distanceKm = distanceKm,
+                    pace = pace,
+                    durationText = durationText,
+                    calories = calories,
                     onUpdateStats = { likes, comments ->
                         prefs.edit()
                             .putInt("likes_$postId", likes)
                             .putInt("comments_$postId", comments)
                             .apply()
-                    }
+                    },
                 )
             }
         }
@@ -102,12 +121,33 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
     var content by remember { mutableStateOf("") }
     var hashtags by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-
+    var selectedRun by remember { mutableStateOf<RunSummaryRef?>(null) }
     //사진 선택 런처
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        selectedImageUri = uri
-    }
+    val imagePicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                selectedImageUri = uri
+            }
+        }
 
+    fun loadLatestRun(context: Context): List<RunSummaryRef> {
+        val sp = context.getSharedPreferences("run_pref", Context.MODE_PRIVATE)
+        val json = sp.getString("runs_json", "[]")
+        val arr = JSONArray(json)
+        return List(arr.length()) { i ->
+            val obj = arr.getJSONObject(i)
+            RunSummaryRef(
+                distanceM = obj.optDouble("distanceM", 0.0),
+                durationMs = obj.optLong("durationMs", 0L),
+                endAt = obj.optLong("endAt", 0L),
+                fileName = obj.optString("fileName", "")
+            )
+        }
+    }
     Scaffold(
         topBar = { TopAppBar(title = { Text("게시글 작성") }) }
     ) { padding ->
@@ -144,9 +184,54 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
             )
 
             Spacer(Modifier.height(16.dp))
+            var showRunPicker by remember { mutableStateOf(false) }
+            val runList = remember { loadLatestRun(context) }
+            Button(onClick = { showRunPicker = true }) {
+                Text("러닝 기록 선택하기")
+            }
+            if (showRunPicker) {
+                AlertDialog(
+                    onDismissRequest = { showRunPicker = false },
+                    title = { Text("러닝 기록 선택") },
+                    text = {
+                        Column {
+                            runList.forEach { run ->
+                                Text(
+                                    text = "거리 ${"%.2f".format(run.distanceM / 1000)} km / 시간 ${
+                                        formatDuration(
+                                            run.durationMs
+                                        )
+                                    }",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            selectedRun = run
+                                            showRunPicker = false
+                                        }
+                                        .padding(12.dp)
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {}
+                )
+            }
+            selectedRun?.let { run ->
+                Spacer(Modifier.height(12.dp))
+                Text("거리: ${"%.2f".format(run.distanceM / 1000)} km")
+                Text("시간: ${formatDuration(run.durationMs)}")
+                Text(
+                    "페이스: ${
+                        formatPace(
+                            calcPace(run.distanceM, run.durationMs) ?: 0.0
+                        )
+                    }"
+                )
+                Text("칼로리: ${"%.0f".format(calcCalories(run.distanceM))} kcal")
+            }
 
             //이미지 미리보기 선택 버튼
-            Button(onClick = { imagePicker.launch("image/*") }) {
+            Button(onClick = { imagePicker.launch(arrayOf("image/*")) }) {
                 Text("사진 첨부하기")
             }
 
@@ -174,6 +259,15 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                             put("content", content)
                             put("hashtags", hashtags)
                             put("imageUri", selectedImageUri?.toString() ?: "")
+                            selectedRun?.let { r ->
+                                put("distanceKm", r.distanceM / 1000)
+                                put("durationMs", r.durationMs)
+                                put(
+                                    "pace",
+                                    formatPace(calcPace(r.distanceM, r.durationMs) ?: 0.0)
+                                )
+                                put("calories", calcCalories(r.distanceM))
+                            }
                         }
                         jsonArray.put(newPost)
                         prefs.edit().putString("user_posts", jsonArray.toString()).apply()
@@ -187,7 +281,6 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommunityDetailScreen(
@@ -201,7 +294,12 @@ fun CommunityDetailScreen(
     imageUri: String?,
     initialLikes: Int,
     initialComments: Int,
+    distanceKm: Double?,
+    durationText: String?,
+    pace: String?,
+    calories: Double?,
     onUpdateStats: (Int, Int) -> Unit
+
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
@@ -215,7 +313,20 @@ fun CommunityDetailScreen(
         topBar = {
             TopAppBar(
                 title = { Text("커뮤니티", fontSize = 20.sp) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                actions = {
+                    // 🔥🔥 여기 삭제 버튼 추가
+                    Text(
+                        "삭제",
+                        color = Color.Red,
+                        modifier = Modifier
+                            .padding(end = 16.dp)
+                            .clickable {
+                                deletePost(prefs, postId)
+                                (context as? Activity)?.finish()
+                            }
+                    )
+                }
             )
         }
     ) { padding ->
@@ -262,20 +373,30 @@ fun CommunityDetailScreen(
             Spacer(Modifier.height(16.dp))
 
 
-            // 거리 + 페이스
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFEDE7F6)) // 연보라
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("거리 7.2km", fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3C96))
-                Text("페이스 5'10''/km", fontWeight = FontWeight.SemiBold, color = Color(0xFF4A3C96))
-            }
+            if (distanceKm != null && pace != null && durationText != null) {
 
-            Spacer(Modifier.height(20.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFEDE7F6))
+                        .padding(18.dp)
+                ) {
+                    Text("🏃 러닝 정보", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Text("거리: ${"%.2f".format(distanceKm)} km", fontSize = 15.sp)
+                    Text("시간: ${durationText}", fontSize = 15.sp)
+                    Text("페이스: $pace", fontSize = 15.sp)
+
+                    if (calories != null) {
+                        Text("칼로리: ${"%.0f".format(calories)} kcal", fontSize = 15.sp)
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+            }
 
             // 좋아요 / 댓글 아이콘
             Row(
@@ -394,19 +515,38 @@ fun CommunityDetailScreen(
         prefs.edit().putString("comments_json_$postId", json.toString()).apply()
     }
 
-    fun loadComments(prefs: SharedPreferences, postId: Int): List<Pair<String, String>> {
-        val jsonString = prefs.getString("comments_json_$postId", null) ?: return emptyList()
-        return try {
-            val jsonArray = JSONArray(jsonString)
-            List(jsonArray.length()) { i ->
-                val obj = jsonArray.getJSONObject(i)
-                obj.getString("writer") to obj.getString("text")
-            }
-        } catch (e: Exception) {
-            emptyList()
+fun loadComments(prefs: SharedPreferences, postId: Int): List<Pair<String, String>> {
+    val jsonString = prefs.getString("comments_json_$postId", null) ?: return emptyList()
+    return try {
+        val jsonArray = JSONArray(jsonString)
+        List(jsonArray.length()) { i ->
+            val obj = jsonArray.getJSONObject(i)
+            obj.getString("writer") to obj.getString("text")
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+fun deletePost(prefs: SharedPreferences, postId: Int) {
+    val savedJson = prefs.getString("user_posts", "[]") ?: "[]"
+    val arr = JSONArray(savedJson)
+    val newArr = JSONArray()
+
+    for (i in 0 until arr.length()) {
+        val obj = arr.getJSONObject(i)
+        if (obj.getInt("id") != postId) {
+            newArr.put(obj)
         }
     }
 
+    prefs.edit().putString("user_posts", newArr.toString()).apply()
+}
+data class RunSummaryRef(
+    val distanceM: Double,
+    val durationMs: Long,
+    val endAt: Long,
+    val fileName: String
+)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CrewDetailScreen(
