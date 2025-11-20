@@ -1,4 +1,4 @@
-package com.example.runningspot.ui.components
+package com.example.runningspot.ui
 
 import android.app.Activity
 import android.util.Log

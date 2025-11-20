@@ -1,4 +1,4 @@
-package com.example.runningspot.ui.components
+package com.example.runningspot.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*

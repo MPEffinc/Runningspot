@@ -1,7 +1,6 @@
 package com.example.runningspot.ui
 
 import android.Manifest
-import android.R.attr.title
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
@@ -64,8 +63,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.autofill.AutofillType
-import androidx.compose.ui.autofill.ContentType.Companion.Username
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -110,9 +107,15 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import org.json.JSONArray
-import com.example.runningspot.ui.components.BottomNavBar
-import kotlinx.serialization.json.JsonNull.content
-import org.json.JSONObject
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Matrix
+import android.media.ExifInterface
+import androidx.compose.ui.graphics.isIdentity
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -314,6 +317,27 @@ fun MainScreen(
         }
     }
 }
+var userMarkerImageUri by mutableStateOf<String?>(null)
+fun getCircularBitmap(bitmap: Bitmap): Bitmap {
+    val size = minOf(bitmap.width, bitmap.height)
+    val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+
+    val canvas = Canvas(output)
+    val paint = Paint().apply { isAntiAlias = true }
+
+    val path = Path().apply {
+        addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CCW)
+    }
+
+    canvas.clipPath(path)
+    canvas.drawBitmap(
+        Bitmap.createScaledBitmap(bitmap, size, size, false),
+        0f,
+        0f,
+        paint
+    )
+    return output
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -343,7 +367,7 @@ fun RunningScreen(
             result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                     result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         // 권한 승인 후 바로 초기 중심 설정
-        tryInitCenter(fusedLocationClient, kakaoMap, hasLocationPermission)
+        tryInitCenter(context,fusedLocationClient, kakaoMap, hasLocationPermission)
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -426,7 +450,7 @@ fun RunningScreen(
                 if (hasLocationPermission) {
                     getSingleFix(fusedLocationClient) { lat, lng ->
                         moveCameraTo(map, lat, lng)
-                        updateCurrentLabel(map, lat, lng)
+                        updateCurrentLabel(context, map, lat, lng)
                     }
                 }
             }
@@ -444,6 +468,20 @@ fun RunningScreen(
             }
         }, readyCb)
     }
+    LaunchedEffect(userMarkerImageUri) {
+        val map = kakaoMap
+        if (map != null && userMarkerImageUri != null) {
+            // 위치 권한이 있고 맵이 준비되었으면 현재 위치로 라벨 갱신
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                getSingleFix(fusedLocationClient) { lat, lng ->
+                    updateCurrentLabel(context, map, lat, lng)
+                }
+            } else {
+                // 권한 없으면 권한 요청을 유도하거나 무시
+            }
+        }
+    }
 
     // ✅ 위치 콜백 (러닝 중 이동경로 추적)
     val locationCallback = remember {
@@ -456,7 +494,7 @@ fun RunningScreen(
                     val latLng = LatLng.from(loc.latitude, loc.longitude)
                     runningPath.add(latLng)
                     moveCameraTo(map, latLng.latitude, latLng.longitude)
-                    updateCurrentLabel(map, latLng.latitude, latLng.longitude)
+                    updateCurrentLabel(context, map, latLng.latitude, latLng.longitude)
                     drawRunningPath(map, routeLineManager, runningPath, currentRoute) {
                         currentRoute = it
                     }
@@ -514,7 +552,7 @@ fun RunningScreen(
                         Log.d("RUNNINGSPOTDEBUG", "SingleFix: $lat, $lng")
                         Toast.makeText(context, "현재 위치: $lat, $lng", Toast.LENGTH_SHORT).show()
                         moveCameraTo(map, lat, lng)
-                        updateCurrentLabel(map, lat, lng)
+                        updateCurrentLabel(context, map, lat, lng)
                     }
                 } else {
                     permissionLauncher.launch(
@@ -546,6 +584,7 @@ fun RunningScreen(
 }
 
 private fun tryInitCenter(
+    context : Context,
     fused: FusedLocationProviderClient,
     map: KakaoMap?,
     hasPermission: Boolean
@@ -553,7 +592,7 @@ private fun tryInitCenter(
     if (!hasPermission || map == null) return
     getSingleFix(fused) { lat, lng ->
         moveCameraTo(map, lat, lng)
-        updateCurrentLabel(map, lat, lng)
+        updateCurrentLabel(context, map, lat, lng)
     }
 }
 
@@ -563,7 +602,7 @@ private fun moveCameraTo(map: KakaoMap, lat: Double, lng: Double) {
     map.moveCamera(update)
 }
 
-private fun updateCurrentLabel(map: KakaoMap, lat: Double, lng: Double) {
+private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, lng: Double) {
     val pos = LatLng.from(lat, lng)
     val labelManager = map.getLabelManager()
     val layer = labelManager?.layer
@@ -571,17 +610,77 @@ private fun updateCurrentLabel(map: KakaoMap, lat: Double, lng: Double) {
     layer?.removeAll()
 
 
-    val styles = labelManager?.addLabelStyles( // 공식 가이드 패턴
-        LabelStyles.from(LabelStyle.from(R.drawable.arrow)) // drawable에 marker 아이콘 추가 필요
-    )
+    val bitmap: Bitmap = try {
+        if (userMarkerImageUri.isNullOrBlank()) {
+            // 기본 리소스 사용
+            BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
+        } else {
+            val uri = Uri.parse(userMarkerImageUri)
+            // 1) 먼저 이미지 크기(메타) 확인
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri).use { ins ->
+                BitmapFactory.decodeStream(ins, null, boundsOpts)
+            }
 
-    val options = LabelOptions.from(pos)
-        .setStyles(styles)
+            // 2) 적절한 inSampleSize 계산 (긴 변을 maxSize로 맞춤)
+            val maxSize = 300 // 마커용 긴 변(px) — 필요시 변경
+            var sample = 1
+            val (ow, oh) = boundsOpts.outWidth to boundsOpts.outHeight
+            if (ow > 0 && oh > 0) {
+                var halfW = ow / 2
+                var halfH = oh / 2
+                while (halfW / sample > maxSize || halfH / sample > maxSize) {
+                    sample *= 2
+                }
+            }
 
+            // 3) 실제 디코딩 (샘플링 적용)
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            var decoded: Bitmap? = null
+            context.contentResolver.openInputStream(uri).use { ins ->
+                decoded = BitmapFactory.decodeStream(ins, null, opts)
+            }
+            var bmp = decoded ?: BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
+
+            // 4) EXIF 회전 보정 (안전하게)
+            bmp = try {
+                context.contentResolver.openInputStream(uri).use { ins ->
+                    val exif = ExifInterface(ins!!)
+                    val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                    val matrix = Matrix()
+                    when (orientation) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                        else -> {}
+                    }
+                    if (!matrix.isIdentity) {
+                        Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                    } else bmp
+                }
+            } catch (e: Exception) {
+                // EXIF 읽기 실패해도 원본 사용
+                bmp
+            }
+
+            // 5) 최종 크기 보정(정확히 마커용 사이즈로 스케일)
+            val target = 200 // 최종 마커 사이즈(px) — 필요하면 변경
+            val scaled = Bitmap.createScaledBitmap(bmp, target, target, true)
+            // 6) 원형으로 잘라주기
+            getCircularBitmap(scaled)
+        }
+    } catch (e: Exception) {
+        Log.e("UPDATE_LABEL", "bitmap load failed", e)
+        BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
+    }
+
+    // 라벨 스타일/추가 (기존 방식과 동일)
+    val style = LabelStyle.from(bitmap)
+    val styles = labelManager?.addLabelStyles(LabelStyles.from(style))
+    val options = LabelOptions.from(pos).setStyles(styles)
     layer?.addLabel(options)
-
-    Log.d("RUNNINGSPOTDEBUG", "Label added at $lat, $lng")
 }
+
 
 private fun drawRunningPath(
     map: KakaoMap,
