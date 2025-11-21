@@ -961,10 +961,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                         contentDescription = null,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(top = 20.dp, bottom = 20.dp)
-                                            .padding(horizontal = 20.dp)
+                                            .padding(top = 4.dp, bottom = 4.dp)
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
                                             .aspectRatio(16f / 9f)
-                                            .clip(RoundedCornerShape(14.dp)),
+                                            .clip(RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop
                                     )
                                 } else {
@@ -973,10 +973,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                         contentDescription = null,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(top = 20.dp, bottom = 20.dp)
-                                            .padding(horizontal = 20.dp)
+                                            .padding(top = 4.dp, bottom = 4.dp)
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
                                             .aspectRatio(16f / 9f)
-                                            .clip(RoundedCornerShape(14.dp)),
+                                            .clip(RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop
                                     )
                                 }
