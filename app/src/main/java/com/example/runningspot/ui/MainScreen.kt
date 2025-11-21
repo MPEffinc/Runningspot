@@ -963,7 +963,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                             .fillMaxWidth()
                                             .padding(top = 4.dp, bottom = 4.dp)
                                             .padding(horizontal = 4.dp, vertical = 4.dp)
-                                            .aspectRatio(16f / 9f)
+                                            .aspectRatio(1f)
                                             .clip(RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop
                                     )
@@ -975,7 +975,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                             .fillMaxWidth()
                                             .padding(top = 4.dp, bottom = 4.dp)
                                             .padding(horizontal = 4.dp, vertical = 4.dp)
-                                            .aspectRatio(16f / 9f)
+                                            .aspectRatio(1f)
                                             .clip(RoundedCornerShape(8.dp)),
                                         contentScale = ContentScale.Crop
                                     )
