@@ -117,6 +117,7 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import androidx.compose.ui.graphics.isIdentity
 
+
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
 private const val RUN_KEY = "runs_json"
@@ -230,6 +231,7 @@ fun MainScreen(
     var lastDuration by rememberSaveable { mutableStateOf<Long?>(null) }
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
+    var showInfoOnMyPage by rememberSaveable { mutableStateOf(false) }
 
 // 앱 시작 시 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
@@ -248,8 +250,7 @@ fun MainScreen(
     ) { padding ->
 
         when (selectedTab) {
-            0 -> InfoScreen(padding)
-            1 -> {
+            0 -> {
                 if (showHistory) {
                     HistoryList(
                         padding = padding,
@@ -290,6 +291,10 @@ fun MainScreen(
                     )
                 }
             }
+            1 -> WeeklyStatsScreen(
+                padding = padding,
+                runs = runRefs
+            )
             2 -> RunningScreen(
                 padding = padding,
                 onRunResult = { distance, duration, pathPairs ->
@@ -308,15 +313,40 @@ fun MainScreen(
                 }
             )
             3 -> CommunityScreen(padding, userName)
-            4 -> MyPageScreen(
-                padding = padding,
-                userName = userName,
-                userProfile = userProfile,
-                provider = provider,
-                onLogout = onLogout)
+            4 -> {
+                if (showInfoOnMyPage) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                            .padding(16.dp)
+                    ) {
+                        Column(
+                            Modifier.fillMaxSize()
+                        ) {
+                            Button(onClick = { showInfoOnMyPage = false }) {
+                                Text("← 뒤로")
+                            }
+                            Spacer(Modifier.height(12.dp))
+
+                            InfoScreen(padding = PaddingValues(0.dp))
+                        }
+                    }
+                } else {
+                    MyPageScreen(
+                        padding = padding,
+                        userName = userName,
+                        userProfile = userProfile,
+                        provider = provider,
+                        onLogout = onLogout,
+                        onShowInfo = { showInfoOnMyPage = true }
+                    )
+                }
+            }
         }
     }
 }
+
 var userMarkerImageUri by mutableStateOf<String?>(null)
 fun getCircularBitmap(bitmap: Bitmap): Bitmap {
     val size = minOf(bitmap.width, bitmap.height)
@@ -1274,7 +1304,8 @@ fun MyPageScreen(
     userName: String?,
     userProfile: String?,
     provider: String?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onShowInfo: () -> Unit
 ) {
     Box(
         Modifier
@@ -1317,6 +1348,14 @@ fun MyPageScreen(
                 colors = ButtonDefaults.buttonColors(Color.Red)
             ) {
                 Text("로그아웃", color = Color.White)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Button(
+                onClick = onShowInfo
+            ) {
+                Text("앱 정보")
             }
         }
     }
@@ -1550,4 +1589,177 @@ private fun HistoryList(
 private fun formatDate(ms: Long): String {
     val sdf = java.text.SimpleDateFormat("yyyy.MM.dd HH:mm", java.util.Locale.getDefault())
     return sdf.format(java.util.Date(ms))
+}
+
+@Composable
+private fun WeeklyStatsScreen(
+    padding: PaddingValues,
+    runs: List<RunSummaryRef>
+) {
+    val now = System.currentTimeMillis()
+    val dayMs = 24L * 60L * 60L * 1000L
+    val oneWeekAgo = now - 6L * dayMs   // 오늘 포함 7일
+
+    // 캘린더: 하루 단위로 자르기
+    val cal = java.util.Calendar.getInstance()
+    fun normalizeToDayStart(timeMs: Long): Long {
+        cal.timeInMillis = timeMs
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    // 최근 1주일만 필터
+    val weekRuns = runs.filter { it.endAt >= oneWeekAgo }
+
+    // 날짜별 총 거리(km)
+    val groupedByDayKm: Map<Long, Double> = weekRuns
+        .groupBy { normalizeToDayStart(it.endAt) }
+        .mapValues { (_, list) -> list.sumOf { it.distanceM } / 1000.0 }
+
+    // 날짜별 총 시간(ms)
+    val groupedByDayDuration: Map<Long, Long> = weekRuns
+        .groupBy { normalizeToDayStart(it.endAt) }
+        .mapValues { (_, list) -> list.sumOf { it.durationMs } }
+
+    val dateFormat = java.text.SimpleDateFormat("MM/dd", java.util.Locale.getDefault())
+
+    data class DayStat(
+        val dayStartMs: Long,
+        val label: String,
+        val valueKm: Double,
+        val kcal: Double,
+        val durationMs: Long
+    )
+
+    // 최근 7일(과거→오늘 순) 리스트
+    val days: List<DayStat> = (0..6).map { offset ->
+        val dayStart = normalizeToDayStart(oneWeekAgo + offset * dayMs)
+
+        val km = groupedByDayKm[dayStart] ?: 0.0
+        val durationMs = groupedByDayDuration[dayStart] ?: 0L
+        val kcal = if (km > 0.0) calcCalories(km * 1000.0) else 0.0
+
+        DayStat(
+            dayStartMs = dayStart,
+            label = dateFormat.format(java.util.Date(dayStart)),
+            valueKm = km,
+            kcal = kcal,
+            durationMs = durationMs
+        )
+    }
+
+    val maxValueKm = days.maxOfOrNull { it.valueKm } ?: 0.0
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp)
+    ) {
+        Text("📈 최근 1주일 러닝 기록", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+
+        if (maxValueKm <= 0.0) {
+            // 최근 1주일 기록 없음
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "최근 1주일 동안 저장된 러닝 기록이 없어요.\n러닝을 시작하고 다시 확인해 보세요!",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        } else {
+            // 막대 그래프 (거리 기준)
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+            ) {
+                val barCount = days.size
+                val maxVal = maxValueKm.toFloat()
+
+                val barWidth = size.width / (barCount * 1.7f)
+                val barSpace = barWidth * 0.8f
+                val chartHeight = size.height * 0.8f
+
+                days.forEachIndexed { index, day ->
+                    val value = day.valueKm.toFloat()
+                    if (value <= 0f) return@forEachIndexed
+
+                    val ratio = value / maxVal
+                    val barHeight = chartHeight * ratio
+
+                    val xCenter = barWidth / 2f +
+                            index * (barWidth + barSpace)
+                    val top = size.height - barHeight
+
+                    drawRect(
+                        color = Color(0xFF4CAF50),
+                        topLeft = androidx.compose.ui.geometry.Offset(
+                            xCenter - barWidth / 2f,
+                            top
+                        ),
+                        size = androidx.compose.ui.geometry.Size(
+                            barWidth,
+                            barHeight
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // x축 라벨 (날짜 + km + kcal + 시간)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                days.forEach { day ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(day.label, fontSize = 11.sp)
+
+                        if (day.valueKm > 0.0) {
+                            Text(
+                                "%.1f km".format(day.valueKm),
+                                fontSize = 10.sp,
+                                color = Color.Black
+                            )
+                            Text(
+                                formatDuration(day.durationMs),
+                                fontSize = 10.sp,
+                                color = Color.Black
+                            )
+                            Text(
+                                "%.0f kcal".format(day.kcal),
+                                fontSize = 10.sp,
+                                color = Color.Black
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // 요약 정보
+        val totalKm = days.sumOf { it.valueKm }
+        val totalKcal = days.sumOf { it.kcal }
+        val totalRuns = weekRuns.size
+        val totalDurationMs = days.sumOf { it.durationMs }
+
+        Text("요약", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Spacer(Modifier.height(8.dp))
+        Text("최근 1주일 총 러닝 횟수: ${totalRuns}회")
+        Text("최근 1주일 총 거리: ${"%.1f".format(totalKm)} km")
+        Text("최근 1주일 총 러닝 시간: ${formatDuration(totalDurationMs)}")
+        Text("최근 1주일 총 소모 칼로리: ${"%.0f".format(totalKcal)} kcal")
+    }
 }
