@@ -446,6 +446,8 @@ class RunningActivity : ComponentActivity() {
 
         // 결과 경로를 Intent로 반환
         val intent = Intent()
+        intent.putExtra("runningDistance", totalDistance)
+        intent.putExtra("runningTime", SystemClock.elapsedRealtime() - startTime)
         intent.putExtra("pathSize", runningPath.size)
         runningPath.forEachIndexed { i, latLng ->
             intent.putExtra("lat_$i", latLng.latitude)

@@ -1511,6 +1511,7 @@ private fun HistoryList(
 
         val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
         val totalDurationMs = runs.sumOf { it.durationMs }
+        val totalCalories = runs.sumOf { calcCalories(it.distanceM) }
 
         if (runs.isNotEmpty()) {
             Card(
@@ -1527,6 +1528,7 @@ private fun HistoryList(
                     Text("총 러닝 횟수: ${runs.size}회")
                     Text("총 거리: ${"%.1f".format(totalDistanceKm)} km")
                     Text("총 시간: ${formatDuration(totalDurationMs)}")
+                    Text("총 소모 칼로리: ${"%.0f".format(totalCalories)} kcal")
                 }
             }
         }
