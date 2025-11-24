@@ -1600,10 +1600,10 @@ private fun WeeklyStatsScreen(
 ) {
     val now = System.currentTimeMillis()
     val dayMs = 24L * 60L * 60L * 1000L
-    val oneWeekAgo = now - 6L * dayMs   // 오늘 포함 7일
+    val oneWeekAgo = now - 6L * dayMs
 
-    // 캘린더: 하루 단위로 자르기
     val cal = java.util.Calendar.getInstance()
+    // 캘린더: 하루 단위로 자르기
     fun normalizeToDayStart(timeMs: Long): Long {
         cal.timeInMillis = timeMs
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
