@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "461551219004",
+    "project_id": "runningspot-0607nam",
+    "storage_bucket": "runningspot-0607nam.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:461551219004:android:12f47a3f81fd0fcf6c2e39",
+        "android_client_info": {
+          "package_name": "com.example.runningspot"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "461551219004-sr79hlva20m8mn8g9mle512fq80iec1i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.runningspot",
+            "certificate_hash": "e2a5b43d9724f921f217873e9ba11bac2ba23819"
+          }
+        },
+        {
+          "client_id": "461551219004-iq33tbifm7u43f6o49p11gakk49g2iuq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBkXeht_pfgwLPZBJ83y9EP4u2Azow0D8I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "461551219004-iq33tbifm7u43f6o49p11gakk49g2iuq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

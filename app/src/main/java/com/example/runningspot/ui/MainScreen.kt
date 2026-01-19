@@ -7,6 +7,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
@@ -84,6 +91,7 @@ import com.example.runningspot.CommunityActivity
 import com.example.runningspot.R
 import com.example.runningspot.RunningActivity
 import com.example.runningspot.loadComments
+import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -107,15 +115,6 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import org.json.JSONArray
-
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Matrix
-import android.media.ExifInterface
-import androidx.compose.ui.graphics.isIdentity
 
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
@@ -1596,8 +1595,21 @@ private fun formatDate(ms: Long): String {
 @Composable
 private fun WeeklyStatsScreen(
     padding: PaddingValues,
-    runs: List<RunSummaryRef>
+    runs: List<RunSummaryRef>,
+    viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
+    var selectedRouteId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    // 상세 화면으로 전환
+    if (selectedRouteId != null) {
+        RouteDetailScreen(
+            padding = padding,
+            routeId = selectedRouteId!!,
+            onBack = { selectedRouteId = null }
+        )
+        return
+    }
+
     val now = System.currentTimeMillis()
     val dayMs = 24L * 60L * 60L * 1000L
     val oneWeekAgo = now - 6L * dayMs
@@ -1763,5 +1775,10 @@ private fun WeeklyStatsScreen(
         Text("최근 1주일 총 거리: ${"%.1f".format(totalKm)} km")
         Text("최근 1주일 총 러닝 시간: ${formatDuration(totalDurationMs)}")
         Text("최근 1주일 총 소모 칼로리: ${"%.0f".format(totalKcal)} kcal")
+
+        NearbyRoutesSection(
+            viewModel = viewModel,
+            onRouteClick = { id -> selectedRouteId = id }
+        )
     }
 }
