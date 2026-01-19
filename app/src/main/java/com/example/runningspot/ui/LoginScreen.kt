@@ -17,8 +17,11 @@ import coil.compose.rememberAsyncImagePainter
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.GoogleAuthProvider
 import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.user.UserApiClient
+import com.example.runningspot.R
+import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: String) -> Unit) {
@@ -32,7 +35,9 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            // .requestIdToken("웹 클라이언트 ID")  // 서버 검증 필요하면 사용
+            .requestIdToken(
+                context.getString(R.string.default_web_client_id)
+            )
             .build()
     }
     val googleClient = remember(activity) {
@@ -40,14 +45,14 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
         activity?.let { GoogleSignIn.getClient(it, gso) }
     }
 
-    /*
+
     LaunchedEffect(Unit) {
         val googleAccount = GoogleSignIn.getLastSignedInAccount(context)
         if (googleAccount != null) {
             onLoginSuccess(googleAccount.displayName, googleAccount.photoUrl?.toString(), "google")
             return@LaunchedEffect
         }
-        // Kakao 토큰 체크
+        /*// Kakao 토큰 체크
         UserApiClient.instance.accessTokenInfo { token, error ->
             if (error == null && token != null) {
                 UserApiClient.instance.me { user, err ->
@@ -60,8 +65,8 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                     }
                 }
             }
-        }
-    } */
+        }*/
+    }
 
     // ✅ Google 로그인 Launcher
     val googleLauncher = rememberLauncherForActivityResult(
@@ -70,17 +75,33 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
             val account = task.getResult(ApiException::class.java)
-            nickname = account?.displayName
-            profileUrl = account?.photoUrl?.toString()
-            provider = "google"
-            onLoginSuccess(nickname, profileUrl, provider!!)      // ✅ 메인으로 전환
+            val idToken = account.idToken
+
+            if (idToken == null) {
+                Toast.makeText(context, "ID Token 없음", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+
+            FirebaseAuth.getInstance()
+                .signInWithCredential(credential)
+                .addOnSuccessListener { authResult ->
+                    val user = authResult.user
+                    onLoginSuccess(
+                        user?.displayName,
+                        user?.photoUrl?.toString(),
+                        "google"
+                    )
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
+                    Log.e("GOOGLE", "firebase signIn failed", e)
+                }
+
         } catch (e: ApiException) {
-            // 상태코드로 원인 파악: 10(DEVELOPER_ERROR/SHA1 미등록), 12500(설정 이슈), 7(네트워크)
             Log.e("GOOGLE", "signIn failed code=${e.statusCode}", e)
             Toast.makeText(context, "구글 로그인 실패(${e.statusCode})", Toast.LENGTH_SHORT).show()
-        } catch (t: Throwable) {
-            Log.e("GOOGLE", "signIn failed", t)
-            Toast.makeText(context, "구글 로그인 실패", Toast.LENGTH_SHORT).show()
         }
     }
 

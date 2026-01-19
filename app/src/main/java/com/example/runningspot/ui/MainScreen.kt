@@ -83,7 +83,6 @@ import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.CommunityActivity
 import com.example.runningspot.R
 import com.example.runningspot.RunningActivity
-import com.example.runningspot.loadComments
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -115,8 +114,21 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.isIdentity
-
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.firebase.auth.FirebaseAuth
+import com.kakao.sdk.user.UserApiClient
+import com.example.runningspot.data.CrewRepository
+import kotlinx.coroutines.launch
+import com.example.runningspot.data.model.CrewPost
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -845,12 +857,65 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
+    val repo = remember { com.example.runningspot.data.CommunityPostRepository() }
+    val scope = rememberCoroutineScope()
+
 
     var refreshKey by remember { mutableStateOf(0) }
-    val posts by remember(refreshKey) { mutableStateOf(loadPosts(prefs)) }
+    var posts by remember { mutableStateOf<List<Post>>(emptyList()) }
+
+    val crewRepo = remember { CrewRepository() }
+    var crews by remember { mutableStateOf<List<CrewPost>>(emptyList()) }
+    LaunchedEffect(refreshKey) {
+        // 커뮤니티 posts 로딩은 기존대로
+        val localPosts = loadPosts(prefs)
+        val remote = repo.fetchLatestPosts(50)
+        val remotePostsForUi: List<Post> = remote.map { (docId, p) ->
+            Post(
+                id = docId.hashCode(),
+                docId = docId,
+                title = p.content.take(18),
+                authorName = p.authorId.ifBlank { "익명" },
+                content = p.content,
+                likes = p.likeCount.toInt(),
+                comments = p.commentCount.toInt(),
+                imageRes = R.drawable.sea,
+                imageUri = p.imageUrls.firstOrNull()
+            )
+        }
+        posts = remotePostsForUi + localPosts
+
+        // ✅ 여기 추가: crews도 Firestore에서 로딩
+        crews = crewRepo.fetchCrews()
+    }
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabTitles = listOf("커뮤니티", "크루")
+    LaunchedEffect(refreshKey) {
+        // 기존 더미 + SharedPreferences 글은 유지하고 싶으면:
+        val localPosts = loadPosts(prefs)
+
+        // Firestore에서 최신 글 읽기
+        val remote = repo.fetchLatestPosts(50)
+
+        // Firestore -> UI Post로 변환 (title이 Firestore에 없어서 임시로 content 앞부분을 title로 사용)
+        val remotePostsForUi: List<Post> = remote.map { (docId, p) ->
+            Post(
+                id = docId.hashCode(),              // ⚠️ 임시: UI가 Int id라서 docId를 hash로 변환
+                docId = docId,
+                title = p.content.take(18),         // ⚠️ 임시 title(나중에 Firestore에 title 필드 추가 추천)
+                authorName = p.authorName.ifBlank { "익명" },
+                content = p.content,
+                likes = p.likeCount.toInt(),
+                comments = p.commentCount.toInt(),
+                imageRes = R.drawable.sea,          // Firestore는 imageRes가 없으니 임시 기본 이미지
+                imageUri = p.imageUrls.firstOrNull() // Firestore imageUrls[0]를 썸네일로
+            )
+        }
+
+        // “기존 로컬글 + Firestore글” 합치기
+        posts = remotePostsForUi + localPosts
+    }
 
     // 돌아올 때 새로고침
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -861,35 +926,6 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    val crewList = listOf(
-        Crew(
-            id = 1,
-            name = "Crew Momentum",
-            location = "Songpa-dong, Incheon",
-            description = "Momentum 팀 모임에서 같이 뛰실 분들을 모집합니다! 인천팀 실력이 아니더라도 환영! 저녁에 함께 달리고 싶으신 분들 위주!",
-            likes = 3,
-            comments = 12,
-            profileRes = R.drawable.tom1
-        ),
-        Crew(
-            id = 2,
-            name = "주호준",
-            location = "Songpa-dong, Incheon",
-            description = "Shirokuro 출신! 8시 운동 세트도 바쁘고 같이 뛰실 분도 없나요? 초보 환영! 저도 초보입니다.",
-            likes = 1,
-            comments = 2,
-            profileRes = R.drawable.tom2
-        ),
-        Crew(
-            id = 3,
-            name = "Crew UNiverse",
-            location = "Songpa-dong, Incheon",
-            description = "UNiverse 러닝 좋아하시는 분들 모이세요! 너무 쉬운 샌티드 코스 준비완료!",
-            likes = 4,
-            comments = 10,
-            profileRes = R.drawable.tom3
-        )
-    )
 
     // 전체 화면
     Box(
@@ -929,21 +965,49 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             }
 
             Spacer(Modifier.height(12.dp))
-
+            fun openChat(crewId: String) {
+                val intent = Intent(context, CommunityActivity::class.java)
+                intent.putExtra("isChatMode", true)
+                intent.putExtra("crewId", crewId)
+                context.startActivity(intent)
+            }
             // 크루 탭
             if (selectedTab == 1) {
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                    items(crewList) { crew ->
-                        CrewCard(crew = crew) {
-                            val intent = Intent(context, CommunityActivity::class.java)
-                            intent.putExtra("crewName", crew.name)
-                            context.startActivity(intent)
-                        }
+                    items(crews, key = { it.id }) { crew ->
+
+                        CrewPostCard(
+                            crew = crew,
+                            onClick = {
+                                scope.launch {
+                                    val ok = crewRepo.isMember(crew.id)
+                                    if (ok) openChat(crew.id)
+                                }
+                            },
+                            onJoin = {
+                                scope.launch {
+                                    try {
+                                        crewRepo.joinCrew(crew.id)
+
+                                        // 🔄 다시 불러오기
+                                        crews = crewRepo.fetchCrews()
+
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            e.message ?: "참여 실패",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             } else {
@@ -975,6 +1039,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     intent.putExtra("calories", post.calories ?: Double.NaN)
                                     intent.putExtra("userName", userName)
                                     intent.putExtra("imageUri", post.imageUri)
+                                    intent.putExtra("docId", post.docId)
                                     context.startActivity(intent)
                                 },
                             shape = RoundedCornerShape(18.dp),
@@ -1098,17 +1163,6 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                 }
 
                                 Spacer(Modifier.height(12.dp))
-
-                                val previewComments =
-                                    loadComments(prefs, post.id).take(2)
-
-                                if (previewComments.isNotEmpty()) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        previewComments.forEach { (_, comment) ->
-                                            Text("• $comment", color = Color.DarkGray)
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -1116,14 +1170,11 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             }
         }
 
-        // FAB
+        var showWritePicker by remember { mutableStateOf(false) }
+
+// FAB
         FloatingActionButton(
-            onClick = {
-                val intent = Intent(context, CommunityActivity::class.java)
-                intent.putExtra("userName", userName)
-                intent.putExtra("isWriteMode", true)
-                context.startActivity(intent)
-            },
+            onClick = { showWritePicker = true },
             containerColor = Color(0xFF6C4CD3),
             shape = CircleShape,
             modifier = Modifier
@@ -1132,79 +1183,82 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         ) {
             Icon(Icons.Default.Add, contentDescription = "추가", tint = Color.White)
         }
+
+// ✅ 선택 다이얼로그
+        if (showWritePicker) {
+            AlertDialog(
+                onDismissRequest = { showWritePicker = false },
+                title = { Text("무엇을 작성할까요?") },
+                text = {
+                    Column {
+                        Button(
+                            onClick = {
+                                showWritePicker = false
+                                val intent = Intent(context, CommunityActivity::class.java)
+                                intent.putExtra("isWriteMode", true)
+                                intent.putExtra("writeType", "post")   // ✅ 추가
+                                intent.putExtra("userName", userName)
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("피드 쓰기") }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Button(
+                            onClick = {
+                                showWritePicker = false
+                                val intent = Intent(context, CommunityActivity::class.java)
+                                intent.putExtra("isWriteMode", true)
+                                intent.putExtra("writeType", "crew")   // ✅ 추가
+                                intent.putExtra("userName", userName)
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("크루 모집글 쓰기") }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showWritePicker = false }) { Text("취소") }
+                }
+            )
+        }
     }
 }
+
 @Composable
-fun CrewCard(crew: Crew, onClick: () -> Unit) {
+fun CrewPostCard(
+    crew: CrewPost,
+    onClick: () -> Unit,
+    onJoin: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(18.dp),
-        elevation = CardDefaults.cardElevation(4.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Row(modifier = Modifier.padding(16.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(crew.title, fontWeight = FontWeight.Bold)
+            Text(crew.location, color = Color.Gray)
 
-            // 프로필 원형 이미지
-            Image(
-                painter = painterResource(id = crew.profileRes),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(55.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
+            Spacer(Modifier.height(8.dp))
 
-            Spacer(Modifier.width(16.dp))
+            Text("${crew.currentMembers}/${crew.maxMembers}")
 
-            Column(modifier = Modifier.weight(1f)) {
+            Spacer(Modifier.height(8.dp))
 
+            Button(
+                onClick = onJoin,
+                enabled = crew.currentMembers < crew.maxMembers
+            ) {
                 Text(
-                    crew.name,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF222222)
+                    if (crew.currentMembers >= crew.maxMembers)
+                        "모집 마감"
+                    else
+                        "참여하기"
                 )
-
-                Text(
-                    crew.location,
-                    fontSize = 13.sp,
-                    color = Color.Gray
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                Text(
-                    crew.description,
-                    fontSize = 14.sp,
-                    color = Color.DarkGray,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.Favorite,
-                            contentDescription = null,
-                            tint = Color(0xFFE57373)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("${crew.likes}")
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.ChatBubbleOutline,
-                            contentDescription = null,
-                            tint = Color(0xFF7986CB)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("${crew.comments}")
-                    }
-                }
             }
         }
     }
@@ -1296,8 +1350,35 @@ data class Post(
     val pace: String? = null,
     val durationText: String? = null,
     val calories: Double? = null,
+    val docId: String? = null
 )
+fun logoutAll(
+    context: Context,
+    provider: String?,
+    onLoggedOut: () -> Unit
+) {
+    FirebaseAuth.getInstance().signOut()
+    when (provider?.lowercase()) {
+        "google" -> {
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .requestIdToken(context.getString(R.string.default_web_client_id))
+                .build()
 
+            GoogleSignIn.getClient(context, gso)
+                .signOut()
+                .addOnCompleteListener { onLoggedOut() }
+        }
+        "kakao" -> {
+            UserApiClient.instance.logout { _ ->
+                onLoggedOut()
+            }
+        }
+        else -> {
+            onLoggedOut()
+        }
+    }
+}
 @Composable
 fun MyPageScreen(
     padding: PaddingValues,
@@ -1307,6 +1388,7 @@ fun MyPageScreen(
     onLogout: () -> Unit,
     onShowInfo: () -> Unit
 ) {
+    val context = LocalContext.current
     Box(
         Modifier
             .fillMaxSize()
@@ -1344,7 +1426,7 @@ fun MyPageScreen(
 
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = onLogout,
+                onClick = { logoutAll(context, provider) { onLogout()} },
                 colors = ButtonDefaults.buttonColors(Color.Red)
             ) {
                 Text("로그아웃", color = Color.White)
@@ -1359,7 +1441,6 @@ fun MyPageScreen(
             }
         }
     }
-
 }
 
 @Composable

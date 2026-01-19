@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.runningspot.ui.LoginScreen
 import com.example.runningspot.ui.MainScreen
+import com.google.firebase.auth.FirebaseAuth
 
 class MainActivity : ComponentActivity() {
 
@@ -18,6 +19,10 @@ class MainActivity : ComponentActivity() {
             var userName by rememberSaveable { mutableStateOf<String?>(null) }
             var userProfile by rememberSaveable { mutableStateOf<String?>(null) }
             var loginProvider by rememberSaveable { mutableStateOf<String?>(null) }
+            val auth = FirebaseAuth.getInstance()
+            if (auth.currentUser == null) {
+                auth.signInAnonymously()
+            }
 
             if (isLoggedIn) {
                 MainScreen(
