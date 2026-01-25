@@ -12,8 +12,8 @@ import com.google.firebase.storage.FirebaseStorage
 import java.util.UUID
 
 data class Comment(
-        val authorId: String = "",
-        val authorName: String = "",
+        val userId: String = "",
+        val userName: String = "",
         val text: String = "",
         val createdAt: com.google.firebase.Timestamp? = null
     )
@@ -83,7 +83,7 @@ class CommunityPostRepository(
         return snap.documents.map { it.id to (it.toObject(Comment::class.java) ?: Comment()) }
     }
 
-    suspend fun addComment(postDocId: String, text: String,authorName: String?) {
+    suspend fun addComment(postDocId: String, text: String,userName: String?) {
         val user = FirebaseAuth.getInstance().currentUser
             ?: throw IllegalStateException("로그인이 필요합니다")
 
@@ -92,8 +92,8 @@ class CommunityPostRepository(
 
         db.runTransaction { tx ->
             tx.set(commentsRef.document(), mapOf(
-                "authorId" to user.uid,   // ✅ 댓글 작성자 UID
-                "authorName" to (authorName ?: user.displayName ?: "익명"),
+                "userId" to user.uid,   // ✅ 댓글 작성자 UID
+                "userName" to (userName ?: user.displayName ?: "익명"),
                 "text" to text,
                 "createdAt" to FieldValue.serverTimestamp()
             ))
@@ -111,8 +111,8 @@ class CommunityPostRepository(
             val snap = tx.get(commentRef)
             if (!snap.exists()) return@runTransaction
 
-            val authorId = snap.getString("authorId")
-            if (authorId != uid) {
+            val userId = snap.getString("userId")
+            if (userId != uid) {
                 throw IllegalStateException("작성자만 삭제할 수 있습니다")
             }
 

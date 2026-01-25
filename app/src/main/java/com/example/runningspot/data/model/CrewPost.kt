@@ -6,7 +6,7 @@ data class CrewPost(
     val title: String = "",
     val description: String = "",
     val location: String = "",
-    val authorId: String = "",
+    val userId: String = "",
     val maxMembers: Long = 0,
     val currentMembers: Long = 0,
     val createdAt: com.google.firebase.Timestamp? = null

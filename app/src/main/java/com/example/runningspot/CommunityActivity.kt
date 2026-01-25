@@ -50,7 +50,6 @@ import com.example.runningspot.ui.Post
 import com.example.runningspot.ui.calcCalories
 import com.example.runningspot.ui.calcPace
 import com.example.runningspot.ui.formatPace
-import com.example.runningspot.ui.loadPosts
 import okhttp3.internal.concurrent.formatDuration
 import org.json.JSONArray
 import org.json.JSONObject
@@ -233,7 +232,7 @@ fun CrewWriteScreen(userName: String) {
                         "title" to title.trim(),
                         "location" to location.trim(),
                         "description" to description.trim(),
-                        "authorId" to user.uid,
+                        "userId" to user.uid,
                         "maxMembers" to maxMembers,
                         "currentMembers" to 0L,
                         "createdAt" to FieldValue.serverTimestamp()
@@ -414,11 +413,9 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                     fun savePost(imageDownloadUrl: String?) {
                         val postData = hashMapOf(
                             "title" to title,
-                            "authorId" to user.uid,
-                            "authorName" to (userName ?: user.displayName ?: "익명"),
+                            "userId" to user.uid,
+                            "userName" to (userName ?: user.displayName ?: "익명"),
                             "content" to content,
-                            "imageUrls" to emptyList<String>(),
-
                             // ✅ Firestore에는 content:// 말고 downloadUrl을 저장
                             "imageUrls" to listOfNotNull(imageDownloadUrl),
 
@@ -529,7 +526,7 @@ fun CommunityDetailScreen(
             val post = repo.fetchPost(safeDocId)
             if (post != null) {
                 likes = post.likeCount.toInt()
-                postAuthorId = post.authorId
+                postAuthorId = post.userId
             }
 
             // 3) 댓글 목록 로딩
@@ -722,7 +719,7 @@ fun CommunityDetailScreen(
 
                         scope.launch {
                             try {
-                                repo.addComment(safeDocId, newComment.trim(),authorName = userName )
+                                repo.addComment(safeDocId, newComment.trim(),userName = userName )
                                 newComment = ""
                                 comments = repo.fetchComments(safeDocId)
                                 onUpdateStats(likes, comments.size)
@@ -747,7 +744,7 @@ fun CommunityDetailScreen(
                     comments.forEach { (commentId, c) ->
                         Column {
                             Text(
-                                text = (c.authorName.ifBlank { c.authorId.take(6) }),
+                                text = (c.userName.ifBlank { c.userId.take(6) }),
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF6C4CD3),
                                 fontSize = 15.sp
@@ -760,7 +757,7 @@ fun CommunityDetailScreen(
 
                             // ✅ 내 댓글만 삭제 버튼 노출(원하면 제거 가능)
                             val myUid = FirebaseAuth.getInstance().currentUser?.uid
-                            if (myUid != null && c.authorId == myUid) {
+                            if (myUid != null && c.userId == myUid) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = "삭제",

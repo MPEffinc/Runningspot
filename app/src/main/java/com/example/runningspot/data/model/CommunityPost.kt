@@ -3,8 +3,8 @@ package com.example.runningspot.data.model
 import com.google.firebase.Timestamp
 
 data class CommunityPost(
-    val authorId: String = "",
-    val authorName: String = "",
+    val userId: String = "",
+    val userName: String = "",
     val content: String = "",
     val imageUrls: List<String> = emptyList(),
     val createdAt: Timestamp? = null,

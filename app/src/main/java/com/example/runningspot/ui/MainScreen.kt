@@ -866,34 +866,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
     val crewRepo = remember { CrewRepository() }
     var crews by remember { mutableStateOf<List<CrewPost>>(emptyList()) }
-    LaunchedEffect(refreshKey) {
-        // 커뮤니티 posts 로딩은 기존대로
-        val localPosts = loadPosts(prefs)
-        val remote = repo.fetchLatestPosts(50)
-        val remotePostsForUi: List<Post> = remote.map { (docId, p) ->
-            Post(
-                id = docId.hashCode(),
-                docId = docId,
-                title = p.content.take(18),
-                authorName = p.authorId.ifBlank { "익명" },
-                content = p.content,
-                likes = p.likeCount.toInt(),
-                comments = p.commentCount.toInt(),
-                imageRes = R.drawable.sea,
-                imageUri = p.imageUrls.firstOrNull()
-            )
-        }
-        posts = remotePostsForUi + localPosts
-
-        // ✅ 여기 추가: crews도 Firestore에서 로딩
-        crews = crewRepo.fetchCrews()
-    }
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabTitles = listOf("커뮤니티", "크루")
     LaunchedEffect(refreshKey) {
-        // 기존 더미 + SharedPreferences 글은 유지하고 싶으면:
-        val localPosts = loadPosts(prefs)
 
         // Firestore에서 최신 글 읽기
         val remote = repo.fetchLatestPosts(50)
@@ -904,7 +880,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                 id = docId.hashCode(),              // ⚠️ 임시: UI가 Int id라서 docId를 hash로 변환
                 docId = docId,
                 title = p.content.take(18),         // ⚠️ 임시 title(나중에 Firestore에 title 필드 추가 추천)
-                authorName = p.authorName.ifBlank { "익명" },
+                authorName = p.userName.ifBlank { "익명" },
                 content = p.content,
                 likes = p.likeCount.toInt(),
                 comments = p.commentCount.toInt(),
@@ -914,7 +890,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         }
 
         // “기존 로컬글 + Firestore글” 합치기
-        posts = remotePostsForUi + localPosts
+        posts = remotePostsForUi
+        crews = crewRepo.fetchCrews()
     }
 
     // 돌아올 때 새로고침
@@ -1262,70 +1239,6 @@ fun CrewPostCard(
             }
         }
     }
-}
-fun loadPosts(prefs: SharedPreferences): List<Post> {
-    fun getSavedLikes(postId: Int) = prefs.getInt("likes_$postId", 0)
-    fun getSavedComments(postId: Int) = prefs.getInt("comments_$postId", 0)
-    val defaultPosts = listOf(
-        Post(
-            id = 1,
-            title = "옛날 생각이 나는 러닝루트",
-            authorName = "김민주",
-            content = "오늘 4km 뛰었어요! 상쾌한 날씨 🌞",
-            pace = "페이스 5'10''/km",
-            distanceKm = 7.2,
-            likes = getSavedLikes(1),
-            comments = getSavedComments(1),
-            imageRes = R.drawable.jeju
-        ),
-        Post(
-            id = 2,
-            title = "도심 속 러닝 코스 추천",
-            authorName = "정민석",
-            content = "오늘 5km 뛰었어요! 시원한 바람 🍃",
-            pace = "페이스 2'3''/km",
-            distanceKm = 8.6,
-            likes = getSavedLikes(2),
-            comments = getSavedComments(2),
-            imageRes = R.drawable.busan
-        ),
-        Post(
-            id = 3,
-            title = "겨울 러닝도 즐겁게!",
-            authorName = "남가을",
-            content = "오늘 6km 뛰었어요! 하늘이 맑아요 🌤",
-            pace = "페이스 3'5''/km",
-            distanceKm = 5.8,
-            likes = getSavedLikes(3),
-            comments = getSavedComments(3),
-            imageRes = R.drawable.sea
-        )
-    )
-
-    // 저장된 사용자 게시글 불러오기
-    val savedJson = prefs.getString("user_posts", "[]")
-    val jsonArray = JSONArray(savedJson)
-    val newPosts = List(jsonArray.length()) { i ->
-        val obj = jsonArray.getJSONObject(i)
-
-        Post(
-            id = obj.getInt("id"),
-            title = obj.optString("title"),
-            authorName = obj.optString("author"),
-            content = obj.optString("content"),
-            likes = getSavedLikes(obj.getInt("id")),
-            comments = getSavedComments(obj.getInt("id")),
-            imageRes = R.drawable.sea,
-            imageUri = obj.optString("imageUri"),
-
-            // ---- 러닝 기록 불러오기 ----
-            distanceKm = obj.optDouble("distanceKm"),
-            pace = obj.optString("pace"),
-            durationText = obj.optString("durationText"),
-            calories = obj.optDouble("calories")
-        )
-    }
-    return defaultPosts + newPosts
 }
 
 data class Crew(
