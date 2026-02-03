@@ -7,5 +7,6 @@ data class CreateRouteRequest(
     val start_lng: Double,
     val end_lat: Double,
     val end_lng: Double,
-    val visibility: String = "PUBLIC"
+    val visibility: String = "PUBLIC",
+    val points: List<RoutePointDto> = emptyList()
 )

@@ -62,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -1494,6 +1495,33 @@ private fun HistoryList(
     onSelect: (RunSummaryRef) -> Unit = {},
     onDelete: (RunSummaryRef) -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val viewModel: com.example.runningspot.viewmodel.RouteViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel()
+
+    var showUploadDialog by remember { mutableStateOf(false) }
+    var uploadTarget by remember { mutableStateOf<RunSummaryRef?>(null) }
+    var uploadTitle by remember { mutableStateOf("") }
+    var uploadVisibility by remember { mutableStateOf("PUBLIC") }
+
+    val createResult by viewModel.createResult.collectAsState()
+    val error by viewModel.error.collectAsState()
+
+    LaunchedEffect(createResult) {
+        if (createResult != null) {
+            Toast.makeText(context, "✅ 루트 업로드 성공! id=${createResult}", Toast.LENGTH_SHORT).show()
+            // 필요하면 여기서 createResult 초기화 메서드 만들어서 초기화해도 됨
+            showUploadDialog = false
+            uploadTarget = null
+        }
+    }
+
+    LaunchedEffect(error) {
+        if (error != null) {
+            Toast.makeText(context, "❌ 업로드 실패: $error", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Column(
         Modifier.fillMaxSize().padding(padding).padding(12.dp)
     ) {
@@ -1572,19 +1600,110 @@ private fun HistoryList(
                                 Spacer(Modifier.height(4.dp))
                                 Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
                             }
-                            Text(
-                                text = "삭제",
-                                color = Color.Red,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .clickable { onDelete(r) }
-                            )
+                            Row(
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = "공유",
+                                    color = Color(0xFF1E88E5),
+                                    modifier = Modifier.clickable {
+                                        // 업로드 대상 선택 + 다이얼로그 열기
+                                        uploadTarget = r
+                                        uploadTitle = r.titleOrDefault()
+                                        uploadVisibility = "PUBLIC"
+                                        showUploadDialog = true
+                                    }
+                                )
+                                Text(
+                                    text = "삭제",
+                                    color = Color.Red,
+                                    modifier = Modifier.clickable { onDelete(r) }
+                                )
+                            }
+
                         }
                     }
                 }
             }
         }
     }
+    if (showUploadDialog && uploadTarget != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showUploadDialog = false },
+            title = { Text("루트 업로드") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = uploadTitle,
+                        onValueChange = { uploadTitle = it },
+                        label = { Text("루트 제목") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    Text("공개 범위", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = if (uploadVisibility == "PUBLIC") "✅ 공개" else "공개",
+                            modifier = Modifier.clickable { uploadVisibility = "PUBLIC" }
+                        )
+                        Text(
+                            text = if (uploadVisibility == "PRIVATE") "✅ 비공개" else "비공개",
+                            modifier = Modifier.clickable { uploadVisibility = "PRIVATE" }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val target = uploadTarget ?: return@Button
+
+                    // 1) 로컬 파일에서 경로 읽기
+                    val pairs = loadRunPathFile(context, target.fileName)
+                    if (pairs.size < 2) {
+                        Toast.makeText(context, "경로가 없어서 업로드할 수 없어요.", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+
+                    // 2) points 만들기
+                    val points = pairs.mapIndexed { idx, p ->
+                        com.example.runningspot.data.remote.RoutePointDto(
+                            seq = idx,
+                            lat = p.first,
+                            lng = p.second
+                        )
+                    }
+
+                    val start = pairs.first()
+                    val end = pairs.last()
+
+                    // 3) CreateRouteRequest 구성
+                    val body = com.example.runningspot.data.remote.CreateRouteRequest(
+                        title = uploadTitle.ifBlank { target.titleOrDefault() },
+                        distance_m = target.distanceM,
+                        start_lat = start.first,
+                        start_lng = start.second,
+                        end_lat = end.first,
+                        end_lng = end.second,
+                        visibility = uploadVisibility,
+                        points = points
+                    )
+
+                    // 4) 서버 업로드 호출
+                    viewModel.createRoute(body)
+                }) { Text("업로드") }
+            },
+            dismissButton = {
+                Button(onClick = { showUploadDialog = false }) { Text("취소") }
+            }
+        )
+    }
+}
+
+private fun RunSummaryRef.titleOrDefault(): String {
+    return "내 러닝 루트 ${formatDate(endAt)}"
 }
 
 private fun formatDate(ms: Long): String {
