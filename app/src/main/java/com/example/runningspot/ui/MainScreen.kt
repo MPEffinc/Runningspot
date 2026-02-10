@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
@@ -105,7 +104,6 @@ import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
-import org.json.JSONArray
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -114,21 +112,18 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
-import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.graphics.isIdentity
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.data.CrewRepository
 import kotlinx.coroutines.launch
-import com.example.runningspot.data.model.CrewPost
+import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
+import androidx.compose.runtime.collectAsState
+import com.example.runningspot.viewmodel.RouteViewModel
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -1489,6 +1484,33 @@ private fun HistoryList(
     onSelect: (RunSummaryRef) -> Unit = {},
     onDelete: (RunSummaryRef) -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val viewModel: com.example.runningspot.viewmodel.RouteViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel()
+
+    var showUploadDialog by remember { mutableStateOf(false) }
+    var uploadTarget by remember { mutableStateOf<RunSummaryRef?>(null) }
+    var uploadTitle by remember { mutableStateOf("") }
+    var uploadVisibility by remember { mutableStateOf("PUBLIC") }
+
+    val createResult by viewModel.createResult.collectAsState()
+    val error by viewModel.error.collectAsState()
+
+    LaunchedEffect(createResult) {
+        if (createResult != null) {
+            Toast.makeText(context, "✅ 루트 업로드 성공! id=${createResult}", Toast.LENGTH_SHORT).show()
+            // 필요하면 여기서 createResult 초기화 메서드 만들어서 초기화해도 됨
+            showUploadDialog = false
+            uploadTarget = null
+        }
+    }
+
+    LaunchedEffect(error) {
+        if (error != null) {
+            Toast.makeText(context, "❌ 업로드 실패: $error", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Column(
         Modifier.fillMaxSize().padding(padding).padding(12.dp)
     ) {
@@ -1567,19 +1589,109 @@ private fun HistoryList(
                                 Spacer(Modifier.height(4.dp))
                                 Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
                             }
-                            Text(
-                                text = "삭제",
-                                color = Color.Red,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .clickable { onDelete(r) }
-                            )
+                            Row(
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = "공유",
+                                    color = Color(0xFF1E88E5),
+                                    modifier = Modifier.clickable {
+                                        // 업로드 대상 선택 + 다이얼로그 열기
+                                        uploadTarget = r
+                                        uploadTitle = r.titleOrDefault()
+                                        uploadVisibility = "PUBLIC"
+                                        showUploadDialog = true
+                                    }
+                                )
+                                Text(
+                                    text = "삭제",
+                                    color = Color.Red,
+                                    modifier = Modifier.clickable { onDelete(r) }
+                                )
+                            }
+
                         }
                     }
                 }
             }
         }
     }
+    if (showUploadDialog && uploadTarget != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showUploadDialog = false },
+            title = { Text("루트 업로드") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = uploadTitle,
+                        onValueChange = { uploadTitle = it },
+                        label = { Text("루트 제목") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    Text("공개 범위", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = if (uploadVisibility == "PUBLIC") "✅ 공개" else "공개",
+                            modifier = Modifier.clickable { uploadVisibility = "PUBLIC" }
+                        )
+                        Text(
+                            text = if (uploadVisibility == "PRIVATE") "✅ 비공개" else "비공개",
+                            modifier = Modifier.clickable { uploadVisibility = "PRIVATE" }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val target = uploadTarget ?: return@Button
+
+                    // 1) 로컬 파일에서 경로 읽기
+                    val pairs = loadRunPathFile(context, target.fileName)
+                    if (pairs.size < 2) {
+                        Toast.makeText(context, "경로가 없어서 업로드할 수 없어요.", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+
+                    // 2) points 만들기
+                    val points = pairs.mapIndexed { idx, p ->
+                        com.example.runningspot.data.remote.RoutePointDto(
+                            seq = idx,
+                            lat = p.first,
+                            lng = p.second
+                        )
+                    }
+
+                    val start = pairs.first()
+                    val end = pairs.last()
+
+                    // 3) CreateRouteRequest 구성
+                    val body = com.example.runningspot.data.remote.CreateRouteRequest(
+                        title = uploadTitle.ifBlank { target.titleOrDefault() },
+                        distance_m = target.distanceM,
+                        start_lat = start.first,
+                        start_lng = start.second,
+                        end_lat = end.first,
+                        end_lng = end.second,
+                        visibility = uploadVisibility,
+                        points = points
+                    )
+
+                    // 4) 서버 업로드 호출
+                    viewModel.createRoute(body)
+                }) { Text("업로드") }
+            },
+            dismissButton = {
+                Button(onClick = { showUploadDialog = false }) { Text("취소") }
+            }
+        )
+    }
+}
+private fun RunSummaryRef.titleOrDefault(): String {
+    return "내 러닝 루트 ${formatDate(endAt)}"
 }
 
 private fun formatDate(ms: Long): String {
@@ -1590,8 +1702,21 @@ private fun formatDate(ms: Long): String {
 @Composable
 private fun WeeklyStatsScreen(
     padding: PaddingValues,
-    runs: List<RunSummaryRef>
+    runs: List<RunSummaryRef>,
+    viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
+    var selectedRouteId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    // 상세 화면으로 전환
+    if (selectedRouteId != null) {
+        RouteDetailScreen(
+            padding = padding,
+            routeId = selectedRouteId!!,
+            onBack = { selectedRouteId = null }
+        )
+        return
+    }
+
     val now = System.currentTimeMillis()
     val dayMs = 24L * 60L * 60L * 1000L
     val oneWeekAgo = now - 6L * dayMs
@@ -1757,5 +1882,10 @@ private fun WeeklyStatsScreen(
         Text("최근 1주일 총 거리: ${"%.1f".format(totalKm)} km")
         Text("최근 1주일 총 러닝 시간: ${formatDuration(totalDurationMs)}")
         Text("최근 1주일 총 소모 칼로리: ${"%.0f".format(totalKcal)} kcal")
+
+        NearbyRoutesSection(
+            viewModel = viewModel,
+            onRouteClick = { id -> selectedRouteId = id }
+        )
     }
 }

@@ -1,6 +1,7 @@
 package com.example.runningspot.ui
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,6 +23,10 @@ import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.R
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 @Composable
 fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: String) -> Unit) {
@@ -30,7 +35,8 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
     var nickname by remember { mutableStateOf<String?>(null) }
     var profileUrl by remember { mutableStateOf<String?>(null) }
     var provider by remember { mutableStateOf<String?>(null) }
-
+    val scope = rememberCoroutineScope()
+    var loading by remember { mutableStateOf(false) }
     // ✅ Google SignIn 초기화
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -67,6 +73,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             }
         }*/
     }
+    val client = remember { OkHttpClient() }
 
     // ✅ Google 로그인 Launcher
     val googleLauncher = rememberLauncherForActivityResult(
@@ -83,16 +90,32 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             }
 
             val credential = GoogleAuthProvider.getCredential(idToken, null)
-
             FirebaseAuth.getInstance()
                 .signInWithCredential(credential)
                 .addOnSuccessListener { authResult ->
                     val user = authResult.user
-                    onLoginSuccess(
-                        user?.displayName,
-                        user?.photoUrl?.toString(),
-                        "google"
-                    )
+
+                    scope.launch {
+                        try {
+                            val result = testUidFromServer("http://10.0.2.2:4000")
+                            Log.d("UID_TEST", "server response=$result")
+
+                            Toast.makeText(context, "서버 UID 테스트 성공", Toast.LENGTH_SHORT).show()
+
+                            onLoginSuccess(
+                                user?.displayName,
+                                user?.photoUrl?.toString(),
+                                "google"
+                            )
+                        } catch (e: Exception) {
+                            Log.e("UID_TEST", "UID test failed", e)
+                            Toast.makeText(
+                                context,
+                                "UID 테스트 실패: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                 }
                 .addOnFailureListener { e ->
                     Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()

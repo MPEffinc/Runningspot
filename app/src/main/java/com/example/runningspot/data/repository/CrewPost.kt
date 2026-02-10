@@ -1,4 +1,4 @@
-package com.example.runningspot.data.model
+package com.example.runningspot.data.repository
 
 
 data class CrewPost(

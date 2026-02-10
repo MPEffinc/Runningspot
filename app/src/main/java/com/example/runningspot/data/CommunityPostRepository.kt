@@ -1,8 +1,7 @@
 package com.example.runningspot.data
 
-import android.app.DownloadManager
 import android.net.Uri
-import com.example.runningspot.data.model.CommunityPost
+import com.example.runningspot.data.repository.CommunityPost
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await

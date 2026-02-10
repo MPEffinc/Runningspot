@@ -20,9 +20,6 @@ class MainActivity : ComponentActivity() {
             var userProfile by rememberSaveable { mutableStateOf<String?>(null) }
             var loginProvider by rememberSaveable { mutableStateOf<String?>(null) }
             val auth = FirebaseAuth.getInstance()
-            if (auth.currentUser == null) {
-                auth.signInAnonymously()
-            }
 
             if (isLoggedIn) {
                 MainScreen(
