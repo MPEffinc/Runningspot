@@ -22,6 +22,8 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.R
+import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.data.remote.KakaoAuthRequest
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -51,28 +53,6 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
         activity?.let { GoogleSignIn.getClient(it, gso) }
     }
 
-
-    LaunchedEffect(Unit) {
-        val googleAccount = GoogleSignIn.getLastSignedInAccount(context)
-        if (googleAccount != null) {
-            onLoginSuccess(googleAccount.displayName, googleAccount.photoUrl?.toString(), "google")
-            return@LaunchedEffect
-        }
-        /*// Kakao 토큰 체크
-        UserApiClient.instance.accessTokenInfo { token, error ->
-            if (error == null && token != null) {
-                UserApiClient.instance.me { user, err ->
-                    if (err == null && user != null) {
-                        onLoginSuccess(
-                            user.kakaoAccount?.profile?.nickname,
-                            user.kakaoAccount?.profile?.thumbnailImageUrl,
-                            "kakao"
-                        )
-                    }
-                }
-            }
-        }*/
-    }
     val client = remember { OkHttpClient() }
 
     // ✅ Google 로그인 Launcher
@@ -134,20 +114,69 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             Toast.makeText(context, "Activity 컨텍스트를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
             return
         }
+
         val callback: (OAuthToken?, Throwable?) -> Unit = { token, error ->
             if (error != null) {
                 Log.e("KAKAO", "login failed", error)
                 Toast.makeText(context, "카카오 로그인 실패", Toast.LENGTH_SHORT).show()
             } else if (token != null) {
+                // 1) 카카오 사용자 정보 조회(닉네임/프로필)
                 UserApiClient.instance.me { user, err ->
                     if (err != null || user == null) {
                         Log.e("KAKAO", "user info failed", err)
                         Toast.makeText(context, "카카오 사용자 정보 조회 실패", Toast.LENGTH_SHORT).show()
-                    } else {
-                        nickname = user.kakaoAccount?.profile?.nickname
-                        profileUrl = user.kakaoAccount?.profile?.thumbnailImageUrl
-                        provider = "kakao"
-                        onLoginSuccess(nickname, profileUrl, provider!!) // ✅ 메인으로 전환
+                        return@me
+                    }
+
+                    nickname = user.kakaoAccount?.profile?.nickname
+                    profileUrl = user.kakaoAccount?.profile?.thumbnailImageUrl
+                    provider = "kakao"
+
+                    // 2) 서버로 accessToken 보내서 Firebase customToken 받기
+                    val accessToken = token.accessToken
+                    scope.launch {
+                        try {
+                            loading = true
+
+                            val resp = ApiClient.authApi.kakaoToFirebase(
+                                KakaoAuthRequest(kakaoAccessToken = accessToken)
+                            )
+
+                            // 3) FirebaseAuth 로그인 (여기서 UID 생성됨)
+                            FirebaseAuth.getInstance()
+                                .signInWithCustomToken(resp.customToken)
+                                .await()
+
+                            // Firebase ID Token 발급 (중요: customToken이 아니라 idToken을 서버에 보냄)
+                            val idToken = FirebaseAuth.getInstance()
+                                .currentUser
+                                ?.getIdToken(true)
+                                ?.await()
+                                ?.token
+
+                            if (idToken == null) {
+                                throw IllegalStateException("Firebase ID Token 발급 실패")
+                            }
+
+                            // /me 호출 -> 서버가 MySQL users에 생성/조회
+                            val me = ApiClient.authApi.me("Bearer $idToken")
+                            Log.d("AUTH", "Server /me ok uid=${me.uid}, userId=${me.userId}")
+
+                            // 이제 Firebase 콘솔 Users에 뜸
+                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                            Log.d("AUTH", "Firebase signIn success uid=$uid")
+
+                            onLoginSuccess(nickname, profileUrl, provider!!)
+                        } catch (e: Exception) {
+                            Log.e("AUTH", "Firebase custom token login failed", e)
+                            Toast.makeText(
+                                context,
+                                "Firebase 연동 로그인 실패: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } finally {
+                            loading = false
+                        }
                     }
                 }
             }
@@ -155,9 +184,9 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
 
         val api = UserApiClient.instance
         if (api.isKakaoTalkLoginAvailable(context)) {
-            api.loginWithKakaoTalk(act, callback = callback)      // ✅ Activity 필수
+            api.loginWithKakaoTalk(act, callback = callback)
         } else {
-            api.loginWithKakaoAccount(act, callback = callback)    // ✅ Activity 필수
+            api.loginWithKakaoAccount(act, callback = callback)
         }
     }
 
