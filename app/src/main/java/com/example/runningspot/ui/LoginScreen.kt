@@ -56,7 +56,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
     val client = remember { OkHttpClient() }
 
     // ✅ Google 로그인 Launcher
-    val googleLauncher = rememberLauncherForActivityResult(
+     val googleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
@@ -74,28 +74,11 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                 .signInWithCredential(credential)
                 .addOnSuccessListener { authResult ->
                     val user = authResult.user
-
-                    scope.launch {
-                        try {
-                            val result = testUidFromServer("http://10.0.2.2:4000")
-                            Log.d("UID_TEST", "server response=$result")
-
-                            Toast.makeText(context, "서버 UID 테스트 성공", Toast.LENGTH_SHORT).show()
-
-                            onLoginSuccess(
-                                user?.displayName,
-                                user?.photoUrl?.toString(),
-                                "google"
-                            )
-                        } catch (e: Exception) {
-                            Log.e("UID_TEST", "UID test failed", e)
-                            Toast.makeText(
-                                context,
-                                "UID 테스트 실패: ${e.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
+                    onLoginSuccess(
+                        user?.displayName,
+                        user?.photoUrl?.toString(),
+                        "google"
+                    )
                 }
                 .addOnFailureListener { e ->
                     Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
