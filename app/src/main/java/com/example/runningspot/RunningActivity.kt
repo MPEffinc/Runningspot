@@ -2,22 +2,36 @@ package com.example.runningspot
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
+import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.ui.getCircularBitmap
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.material.button.MaterialButton
+import com.kakao.vectormap.GestureType
 import com.kakao.vectormap.KakaoMap
 import com.kakao.vectormap.KakaoMapReadyCallback
 import com.kakao.vectormap.LatLng
@@ -26,54 +40,43 @@ import com.kakao.vectormap.MapView
 import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
-import com.kakao.vectormap.label.LabelStyles
 import com.kakao.vectormap.route.RouteLine
 import com.kakao.vectormap.route.RouteLineManager
 import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
+import kotlinx.coroutines.launch
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
-import android.media.ExifInterface
-import android.net.Uri
-import android.telecom.VideoProfile.isPaused
-import android.view.Gravity
-import android.view.View
-import android.widget.FrameLayout
-import com.google.android.material.button.MaterialButton
-import com.example.runningspot.ui.getCircularBitmap
-import com.kakao.vectormap.GestureType
-
 
 class RunningActivity : ComponentActivity() {
 
-    private var followMode = true
-    private var lastKnownLocation: android.location.Location? = null
-    private lateinit var gpsBtn: com.google.android.material.button.MaterialButton
     // 지도 관련
     private lateinit var mapView: MapView
     private var kakaoMap: KakaoMap? = null
 
     // 경로 표시용
-    private var currentRoute: RouteLine? = null
-    private val runningPath = mutableListOf<LatLng>()
+    private var currentRoute: RouteLine? = null           // ✅ 내 러닝 경로(파랑)
+    private var guideRoute: RouteLine? = null             // ✅ 따라뛰기 가이드 라인(빨강/회색 등)
+    private val runningPath = mutableListOf<LatLng>()     // 내 실제 이동 경로
+
+    // 따라뛰기 선택된 루트 id
+    private var followRouteId: Long = -1L                 // ✅ 추가
 
     // 위치 추적용
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
     private var isRunning = false
-    private var userMarkerBitmap: Bitmap? = null
+    private var lastKnownLocation: android.location.Location? = null
 
+    private var userMarkerBitmap: Bitmap? = null
     private var isPaused = false
     private var autoFollow = true
+
     // 상단 UI (거리/시간)
     private lateinit var txtTime: TextView
     private lateinit var txtDistance: TextView
@@ -81,23 +84,28 @@ class RunningActivity : ComponentActivity() {
     private var elapsedTime = 0L
     private var totalDistance = 0.0
 
+    private lateinit var gpsBtn: MaterialButton
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // ✅ 따라뛰기 루트 id 받기 (RunningScreen에서 putExtra한 값)
+        followRouteId = intent.getLongExtra("follow_route_id", -1L)
+
         // ✅ 루트 레이아웃 생성
-        val root = android.widget.FrameLayout(this)
+        val root = FrameLayout(this)
         mapView = MapView(this)
 
         root.addView(
             mapView,
-            android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
         )
-        //마커 설
-        val userMarkerImageUri = intent.getStringExtra("userMarkerImageUri")
 
+        // 마커 설정 (사용자 커스텀 이미지)
+        val userMarkerImageUri = intent.getStringExtra("userMarkerImageUri")
         if (!userMarkerImageUri.isNullOrBlank()) {
             userMarkerBitmap = loadUserRunningMarkerBitmap(this, userMarkerImageUri)
         }
@@ -122,30 +130,32 @@ class RunningActivity : ComponentActivity() {
         infoLayout.addView(txtTime)
         infoLayout.addView(txtDistance)
 
-        val infoParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        val infoParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         }
         root.addView(infoLayout, infoParams)
 
         // ✅ 하단 “러닝 종료” 버튼
-        val stopBtn = com.google.android.material.button.MaterialButton(this).apply {
+        val stopBtn = MaterialButton(this).apply {
             text = "러닝 종료"
             setBackgroundColor(Color.RED)
             setTextColor(Color.WHITE)
             setOnClickListener { stopRunningAndFinish() }
         }
-        val btnParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        val btnParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = android.view.Gravity.END or android.view.Gravity.BOTTOM
+            gravity = Gravity.END or Gravity.BOTTOM
             marginEnd = 48
             bottomMargin = 96
         }
         root.addView(stopBtn, btnParams)
+
+        // ✅ “현재 위치” 버튼 (누르면 autoFollow ON + 현재 위치로)
         gpsBtn = MaterialButton(this).apply {
             text = "현재 위치"
             setBackgroundColor(Color.parseColor("#2196F3"))
@@ -155,11 +165,9 @@ class RunningActivity : ComponentActivity() {
             val sizeH = (50 * resources.displayMetrics.density).toInt()
 
             layoutParams = FrameLayout.LayoutParams(sizeW, sizeH).apply {
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL   // 🔥 정확한 중앙 하단
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                 bottomMargin = (24 * resources.displayMetrics.density).toInt()
             }
-
-            // 항상 보이도록 (autoFollow와 관계 없이)
             visibility = View.VISIBLE
 
             setOnClickListener {
@@ -169,14 +177,14 @@ class RunningActivity : ComponentActivity() {
         root.addView(gpsBtn)
 
         // 하단 왼쪽 “일시정지/재개” 버튼
-        val pauseBtn = com.google.android.material.button.MaterialButton(this).apply {
+        val pauseBtn = MaterialButton(this).apply {
             text = "일시정지"
 
             val sizeW = (120 * resources.displayMetrics.density).toInt()
             val sizeH = (50 * resources.displayMetrics.density).toInt()
 
             layoutParams = FrameLayout.LayoutParams(sizeW, sizeH).apply {
-                gravity = Gravity.BOTTOM or Gravity.START   // ← 좌측 하단
+                gravity = Gravity.BOTTOM or Gravity.START
                 bottomMargin = (24 * resources.displayMetrics.density).toInt()
                 leftMargin = (24 * resources.displayMetrics.density).toInt()
             }
@@ -185,17 +193,16 @@ class RunningActivity : ComponentActivity() {
             setTextColor(Color.WHITE)
             setOnClickListener { togglePause(this) }
         }
-        val pauseParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        val pauseParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
+            gravity = Gravity.START or Gravity.BOTTOM
             marginStart = 48
             bottomMargin = 96
         }
         root.addView(pauseBtn, pauseParams)
 
-        // ✅ 레이아웃 최종 지정
         setContentView(root)
 
         // ✅ 뒤로가기 버튼 처리
@@ -217,22 +224,21 @@ class RunningActivity : ComponentActivity() {
         // 지도 로드 완료 후 실행
         mapView.start(object : MapLifeCycleCallback() {
             override fun onMapDestroy() {}
-            override fun onMapError(error: Exception?) {
-                error?.printStackTrace()
-            }
+            override fun onMapError(error: Exception?) { error?.printStackTrace() }
         }, object : KakaoMapReadyCallback() {
             override fun onMapReady(map: KakaoMap) {
                 kakaoMap = map
-                // 지도 로드 완료 후 러닝 시작
 
+                // ✅ 드래그/핀치하면 자동으로 autoFollow OFF
                 map.setOnCameraMoveStartListener { _, gestureType ->
                     if (gestureType != GestureType.Unknown) {
                         autoFollow = false
                     }
                 }
-                map.setOnMapWidgetClickListener { kakaoMapObj, mapWidget, guiId ->
+
+                // ✅ (선택) 위젯 클릭 시 autoFollow ON
+                map.setOnMapWidgetClickListener { kakaoMapObj, _, _ ->
                     autoFollow = true
-                    // 즉시 현재 위치로 이동 (권한이 있을 때)
                     if (ActivityCompat.checkSelfPermission(
                             this@RunningActivity,
                             Manifest.permission.ACCESS_FINE_LOCATION
@@ -250,7 +256,12 @@ class RunningActivity : ComponentActivity() {
                     }
                 }
 
+                // ✅ 따라뛰기 루트가 있으면: 지도에 "가이드 폴리라인" 한번만 그리기
+                if (followRouteId != -1L) {
+                    drawGuideRouteOnce(map, followRouteId)
+                }
 
+                // ✅ 지도 로드 완료 후 러닝 시작
                 startRunning()
             }
 
@@ -258,18 +269,53 @@ class RunningActivity : ComponentActivity() {
             override fun getZoomLevel(): Int = 15
         })
     }
-    //마커 비트맵 조정 함수
+
+    // ✅ 서버에서 루트 상세 받아서 "가이드 라인" 한 번만 그리기
+    private fun drawGuideRouteOnce(map: KakaoMap, routeId: Long) {
+        lifecycleScope.launch {
+            try {
+                val detail = ApiClient.routeApi.getRouteDetail(routeId) // GET /routes/{id}
+
+                val pts = detail.points
+                    .sortedBy { it.seq } // seq 필수
+                    .map { LatLng.from(it.lat, it.lng) }
+
+                if (pts.size < 2) return@launch
+
+                val manager = map.routeLineManager ?: return@launch
+                val layer = manager.layer
+
+                // 이전 가이드 라인 있으면 제거
+                runCatching { guideRoute?.let { layer.remove(it) } }
+
+                // 가이드 라인은 빨강(또는 회색) 추천
+                val style = RouteLineStyle.from(10f, Color.RED)
+                val styles = RouteLineStyles.from(style)
+                val seg = RouteLineSegment.from(pts).setStyles(styles)
+                val options = RouteLineOptions.from(seg)
+
+                guideRoute = layer.addRouteLine(options).apply { show() }
+
+                // (선택) 시작 지점으로 한번 카메라 이동
+                // map.moveCamera(CameraUpdateFactory.newCenterPosition(pts.first()))
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this@RunningActivity, "가이드 루트 불러오기 실패", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // 마커 비트맵 조정 함수
     private fun loadUserRunningMarkerBitmap(context: Context, uriStr: String): Bitmap? {
         return try {
             val uri = Uri.parse(uriStr)
 
-            // 1) 이미지 메타(크기) 확인
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri).use { ins ->
                 BitmapFactory.decodeStream(ins, null, boundsOpts)
             }
 
-            // 2) inSampleSize 계산
             val maxSize = 300
             var sample = 1
             val (ow, oh) = boundsOpts.outWidth to boundsOpts.outHeight
@@ -281,7 +327,6 @@ class RunningActivity : ComponentActivity() {
                 }
             }
 
-            // 3) 실제 디코딩
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             var bmp: Bitmap? = null
             context.contentResolver.openInputStream(uri).use { ins ->
@@ -289,7 +334,6 @@ class RunningActivity : ComponentActivity() {
             }
             var decoded = bmp ?: return null
 
-            // 4) EXIF 회전 보정
             decoded = try {
                 context.contentResolver.openInputStream(uri).use { ins ->
                     val exif = ExifInterface(ins!!)
@@ -309,11 +353,8 @@ class RunningActivity : ComponentActivity() {
                 }
             } catch (_: Exception) { decoded }
 
-            // 5) 마커 사이즈 보정
             val target = 200
             val scaled = Bitmap.createScaledBitmap(decoded, target, target, true)
-
-            // 6) 원형 변환
             getCircularBitmap(scaled)
 
         } catch (e: Exception) {
@@ -322,18 +363,15 @@ class RunningActivity : ComponentActivity() {
         }
     }
 
-
-    private fun togglePause(btn: com.google.android.material.button.MaterialButton) {
+    private fun togglePause(btn: MaterialButton) {
         if (!isRunning) return
 
         isPaused = !isPaused
         btn.text = if (isPaused) "다시시작" else "일시정지"
 
         if (isPaused) {
-            // 일시정지 → 위치 업데이트 중단
             fused.removeLocationUpdates(locationCallback)
         } else {
-            // 재개 → 권한 체크 후 위치 업데이트 재시작
             if (ActivityCompat.checkSelfPermission(
                     this,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -360,11 +398,13 @@ class RunningActivity : ComponentActivity() {
     // ✅ 위치 추적 콜백
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            if (!isRunning) return
+            if (!isRunning || isPaused) return
             val map = kakaoMap ?: return
             val manager = map.routeLineManager ?: return
 
             for (loc in result.locations) {
+                lastKnownLocation = loc // ✅ 현재 위치 저장
+
                 val p = LatLng.from(loc.latitude, loc.longitude)
 
                 if (runningPath.isNotEmpty()) {
@@ -372,9 +412,11 @@ class RunningActivity : ComponentActivity() {
                 }
 
                 runningPath.add(p)
+
                 if (autoFollow) {
                     moveCameraTo(map, p)
                 }
+
                 updateMarker(map, p)
                 drawPath(manager)
                 updateUI()
@@ -382,10 +424,9 @@ class RunningActivity : ComponentActivity() {
         }
     }
 
-
     // ✅ 거리 계산 (Haversine formula)
     private fun distanceBetween(a: LatLng, b: LatLng): Double {
-        val r = 6371000.0 // Earth radius (m)
+        val r = 6371000.0
         val dLat = Math.toRadians(b.latitude - a.latitude)
         val dLng = Math.toRadians(b.longitude - a.longitude)
         val sa = sin(dLat / 2).pow(2.0)
@@ -403,10 +444,9 @@ class RunningActivity : ComponentActivity() {
         txtDistance.text = "📍 %.2f km".format(totalDistance / 1000.0)
     }
 
-    // ✅ 러닝 시작 (지도 로드 완료 후 실행)
+    // ✅ 러닝 시작
     @SuppressLint("MissingPermission")
     private fun startRunning() {
-        // 위치 권한 확인
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -427,6 +467,7 @@ class RunningActivity : ComponentActivity() {
         fused.lastLocation.addOnSuccessListener { loc ->
             kakaoMap?.let { map ->
                 if (loc != null) {
+                    lastKnownLocation = loc
                     val start = LatLng.from(loc.latitude, loc.longitude)
                     runningPath.add(start)
                     moveCameraTo(map, start)
@@ -439,12 +480,10 @@ class RunningActivity : ComponentActivity() {
         Toast.makeText(this, "러닝 시작!", Toast.LENGTH_SHORT).show()
     }
 
-    // ✅ 러닝 종료 및 결과 반환
     private fun stopRunningAndFinish() {
         isRunning = false
         fused.removeLocationUpdates(locationCallback)
 
-        // 결과 경로를 Intent로 반환
         val intent = Intent()
         intent.putExtra("runningDistance", totalDistance)
         intent.putExtra("runningTime", SystemClock.elapsedRealtime() - startTime)
@@ -459,7 +498,6 @@ class RunningActivity : ComponentActivity() {
         finish()
     }
 
-    // ✅ 지도 관련 함수
     private fun moveCameraTo(map: KakaoMap, p: LatLng) {
         map.moveCamera(CameraUpdateFactory.newCenterPosition(p))
     }
@@ -469,31 +507,34 @@ class RunningActivity : ComponentActivity() {
         val layer = labelManager.layer ?: return
         layer.removeAll()
 
-        val styles = if (userMarkerBitmap != null) {
+        val style = if (userMarkerBitmap != null) {
             LabelStyle.from(userMarkerBitmap)
         } else {
             LabelStyle.from(R.drawable.arrow)
         }
-        layer.addLabel(LabelOptions.from(p).setStyles(styles))
+        layer.addLabel(LabelOptions.from(p).setStyles(style))
     }
 
+    // ✅ 내 러닝 경로(파란색)만 계속 갱신
     private fun drawPath(manager: RouteLineManager) {
         if (runningPath.size < 2) return
         val layer = manager.layer
+
+        // ✅ currentRoute만 지움 (guideRoute는 안 건드림)
         runCatching { currentRoute?.let { layer.remove(it) } }
+
         val style = RouteLineStyle.from(8f, Color.BLUE)
         val styles = RouteLineStyles.from(style)
         val seg = RouteLineSegment.from(runningPath).setStyles(styles)
         val options = RouteLineOptions.from(seg)
+
         currentRoute = layer.addRouteLine(options).apply { show() }
     }
 
-    // 수명주기
     override fun onResume() { super.onResume(); mapView.resume() }
     override fun onPause()  { super.onPause();  mapView.pause() }
     override fun onDestroy(){ super.onDestroy(); mapView.finish() }
 
-    // 권한 결과
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {

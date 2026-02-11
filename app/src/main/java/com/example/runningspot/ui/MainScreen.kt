@@ -232,6 +232,7 @@ fun MainScreen(
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
     var showInfoOnMyPage by rememberSaveable { mutableStateOf(false) }
+    var followRouteId by rememberSaveable { mutableStateOf<Long?>(null) }
 
 // 앱 시작 시 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
@@ -293,19 +294,22 @@ fun MainScreen(
             }
             1 -> WeeklyStatsScreen(
                 padding = padding,
-                runs = runRefs
+                runs = runRefs,
+                onStartFollow = { id ->
+                    followRouteId = id
+                    selectedTab = 2
+                }
             )
             2 -> RunningScreen(
                 padding = padding,
+                followRouteId = followRouteId,
+                onConsumedFollowRoute = { followRouteId = null },
                 onRunResult = { distance, duration, pathPairs ->
                     val endAt = System.currentTimeMillis()
-                    // 1) 경로 파일 저장
                     val fileName = saveRunPathFile(context, endAt, pathPairs)
-                    // 2) 요약 저장(SharedPreferences)
                     val ref = RunSummaryRef(distance, duration, endAt, fileName)
                     saveRunSummaryRef(context, ref)
 
-                    // 3) 메모리 목록/프리뷰 갱신
                     runRefs.add(0, ref)
                     lastDistance = distance
                     lastDuration = duration
@@ -373,6 +377,8 @@ fun getCircularBitmap(bitmap: Bitmap): Bitmap {
 @Composable
 fun RunningScreen(
     padding: PaddingValues,
+    followRouteId: Long? = null,                 // ✅ 추가
+    onConsumedFollowRoute: () -> Unit = {},
     onRunResult: (Double, Long, List<Pair<Double, Double>>) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
@@ -542,7 +548,7 @@ fun RunningScreen(
         runningPath.clear()
         isRunning = true
         val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 2000L
+            Priority.PRIORITY_HIGH_ACCURACY, 1000L
         ).build()
         fusedLocationClient.requestLocationUpdates(request, locationCallback, android.os.Looper.getMainLooper())
         Toast.makeText(context, "러닝 시작!", Toast.LENGTH_SHORT).show()
@@ -603,13 +609,20 @@ fun RunningScreen(
         FloatingActionButton(
             onClick = {
                 val intent = Intent(context, RunningActivity::class.java)
-                launcher.launch(intent)
+
+                followRouteId?.let { id ->
+                    intent.putExtra("follow_route_id", id)
+                    onConsumedFollowRoute()
+                }
+
+                launcher.launch(intent) // ✅ 항상 실행
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
             containerColor = MaterialTheme.colorScheme.primary
-        ) { Text("러닝 시작") }
+        ) { Text(if (followRouteId != null) "루트 따라뛰기" else "러닝 시작")
+        }
     }
 }
 
@@ -1715,6 +1728,7 @@ private fun formatDate(ms: Long): String {
 private fun WeeklyStatsScreen(
     padding: PaddingValues,
     runs: List<RunSummaryRef>,
+    onStartFollow: (Long) -> Unit,
     viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     var selectedRouteId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -1724,10 +1738,16 @@ private fun WeeklyStatsScreen(
         RouteDetailScreen(
             padding = padding,
             routeId = selectedRouteId!!,
-            onBack = { selectedRouteId = null }
+            onBack = { selectedRouteId = null },
+            onNavigate = { id ->
+                selectedRouteId = null     // ✅ 상세 닫고
+                onStartFollow(id)          // ✅ 러닝탭으로 넘어가며 followRouteId 세팅
+            }
+
         )
         return
     }
+
 
     val now = System.currentTimeMillis()
     val dayMs = 24L * 60L * 60L * 1000L
