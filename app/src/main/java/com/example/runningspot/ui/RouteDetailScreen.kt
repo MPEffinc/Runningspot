@@ -47,6 +47,7 @@ fun RouteDetailScreen(
     padding: PaddingValues,
     routeId: Long,
     onBack: () -> Unit,
+    onNavigate: (Long) -> Unit = {},
     viewModel: RouteDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val route by viewModel.route.collectAsState()
@@ -99,7 +100,7 @@ fun RouteDetailScreen(
                 Spacer(Modifier.height(12.dp))
 
                 Button(
-                    onClick = { /* TODO */ },
+                    onClick = {onNavigate(routeId)},
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("이 루트로 뛰기")
