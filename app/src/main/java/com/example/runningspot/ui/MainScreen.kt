@@ -116,7 +116,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.FirebaseAuth
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.data.CrewRepository
 import kotlinx.coroutines.launch
@@ -124,6 +124,7 @@ import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.viewmodel.RouteViewModel
+import com.google.firebase.auth.FirebaseAuth
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
