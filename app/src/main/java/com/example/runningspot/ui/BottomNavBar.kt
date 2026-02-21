@@ -1,4 +1,4 @@
-package com.example.runningspot.ui.components
+package com.example.runningspot.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -8,7 +8,7 @@ import androidx.compose.runtime.*
 @Composable
 fun BottomNavBar(selectedIndex: Int, onTabSelected: (Int) -> Unit) {
     val items = listOf(
-        Icons.Default.Info to "정보",
+        Icons.Default.Info to "기록",
         Icons.Default.Leaderboard to "통계",
         Icons.Default.DirectionsRun to "러닝",
         Icons.Default.People to "커뮤니티",

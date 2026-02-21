@@ -2,36 +2,56 @@ package com.example.runningspot
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.Matrix
-import android.media.ExifInterface
-import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.Gravity
-import android.view.View
-import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
-import com.example.runningspot.R
-import com.example.runningspot.ui.getCircularBitmap
-import com.google.android.gms.location.*
-import com.google.android.material.button.MaterialButton
-import com.kakao.vectormap.*
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.kakao.vectormap.KakaoMap
+import com.kakao.vectormap.KakaoMapReadyCallback
+import com.kakao.vectormap.LatLng
+import com.kakao.vectormap.MapLifeCycleCallback
+import com.kakao.vectormap.MapView
 import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
-import com.kakao.vectormap.route.*
-import kotlin.math.*
+import com.kakao.vectormap.route.RouteLine
+import com.kakao.vectormap.route.RouteLineManager
+import com.kakao.vectormap.route.RouteLineOptions
+import com.kakao.vectormap.route.RouteLineSegment
+import com.kakao.vectormap.route.RouteLineStyle
+import com.kakao.vectormap.route.RouteLineStyles
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.net.Uri
+import android.telecom.VideoProfile.isPaused
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import com.google.android.material.button.MaterialButton
+import com.example.runningspot.ui.getCircularBitmap
+import com.kakao.vectormap.GestureType
+
 
 class RunningActivity : ComponentActivity() {
 
@@ -52,12 +72,8 @@ class RunningActivity : ComponentActivity() {
     private var isRunning = false
     private var userMarkerBitmap: Bitmap? = null
 
-
-
     private var isPaused = false
     private var autoFollow = true
-
-
     // 상단 UI (거리/시간)
     private lateinit var txtTime: TextView
     private lateinit var txtDistance: TextView
@@ -79,7 +95,6 @@ class RunningActivity : ComponentActivity() {
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT
             )
         )
-        
         //마커 설
         val userMarkerImageUri = intent.getStringExtra("userMarkerImageUri")
 
@@ -131,8 +146,6 @@ class RunningActivity : ComponentActivity() {
             bottomMargin = 96
         }
         root.addView(stopBtn, btnParams)
-        
-
         gpsBtn = MaterialButton(this).apply {
             text = "현재 위치"
             setBackgroundColor(Color.parseColor("#2196F3"))
@@ -198,7 +211,7 @@ class RunningActivity : ComponentActivity() {
         // ✅ 위치 및 지도 초기화
         fused = LocationServices.getFusedLocationProviderClient(this)
         locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 800L
+            Priority.PRIORITY_HIGH_ACCURACY, 2000L
         ).build()
 
         // 지도 로드 완료 후 실행
@@ -344,8 +357,6 @@ class RunningActivity : ComponentActivity() {
         autoFollow = true
     }
 
-
-
     // ✅ 위치 추적 콜백
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -354,9 +365,6 @@ class RunningActivity : ComponentActivity() {
             val manager = map.routeLineManager ?: return
 
             for (loc in result.locations) {
-
-                lastKnownLocation = loc
-
                 val p = LatLng.from(loc.latitude, loc.longitude)
 
                 if (runningPath.isNotEmpty()) {
@@ -373,6 +381,7 @@ class RunningActivity : ComponentActivity() {
             }
         }
     }
+
 
     // ✅ 거리 계산 (Haversine formula)
     private fun distanceBetween(a: LatLng, b: LatLng): Double {
@@ -415,7 +424,6 @@ class RunningActivity : ComponentActivity() {
         isRunning = true
         isPaused = false
 
-
         fused.lastLocation.addOnSuccessListener { loc ->
             kakaoMap?.let { map ->
                 if (loc != null) {
@@ -438,6 +446,8 @@ class RunningActivity : ComponentActivity() {
 
         // 결과 경로를 Intent로 반환
         val intent = Intent()
+        intent.putExtra("runningDistance", totalDistance)
+        intent.putExtra("runningTime", SystemClock.elapsedRealtime() - startTime)
         intent.putExtra("pathSize", runningPath.size)
         runningPath.forEachIndexed { i, latLng ->
             intent.putExtra("lat_$i", latLng.latitude)
