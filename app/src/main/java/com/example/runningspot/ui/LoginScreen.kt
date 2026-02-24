@@ -56,7 +56,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
     val client = remember { OkHttpClient() }
 
     // ✅ Google 로그인 Launcher
-    val googleLauncher = rememberLauncherForActivityResult(
+    /*val googleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
@@ -77,7 +77,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
 
                     scope.launch {
                         try {
-                            val result = testUidFromServer("http://10.0.2.2:4000")
+                            val result = testUidFromServer("http://192.168.123.128:4000"/*"http://10.0.2.2:4000/"*/)
                             Log.d("UID_TEST", "server response=$result")
 
                             Toast.makeText(context, "서버 UID 테스트 성공", Toast.LENGTH_SHORT).show()
@@ -96,6 +96,40 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                             ).show()
                         }
                     }
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
+                    Log.e("GOOGLE", "firebase signIn failed", e)
+                }
+
+        } catch (e: ApiException) {
+            Log.e("GOOGLE", "signIn failed code=${e.statusCode}", e)
+            Toast.makeText(context, "구글 로그인 실패(${e.statusCode})", Toast.LENGTH_SHORT).show()
+        }
+    }*/
+    val googleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            val idToken = account.idToken
+
+            if (idToken == null) {
+                Toast.makeText(context, "ID Token 없음", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            FirebaseAuth.getInstance()
+                .signInWithCredential(credential)
+                .addOnSuccessListener { authResult ->
+                    val user = authResult.user
+                    onLoginSuccess(
+                        user?.displayName,
+                        user?.photoUrl?.toString(),
+                        "google"
+                    )
                 }
                 .addOnFailureListener { e ->
                     Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
