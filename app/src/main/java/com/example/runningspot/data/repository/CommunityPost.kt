@@ -11,5 +11,6 @@ data class CommunityPost(
     val updatedAt: Timestamp? = null,
     val likeCount: Long = 0,
     val commentCount: Long = 0,
-    val docId: String = ""
+    val docId: String = "",
+    val routeId: Long? = null,
 )

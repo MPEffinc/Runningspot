@@ -977,7 +977,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                 likes = p.likeCount.toInt(),
                 comments = p.commentCount.toInt(),
                 imageRes = R.drawable.sea,          // Firestore는 imageRes가 없으니 임시 기본 이미지
-                imageUri = p.imageUrls.firstOrNull() // Firestore imageUrls[0]를 썸네일로
+                imageUri = p.imageUrls.firstOrNull(), // Firestore imageUrls[0]를 썸네일로
+                routeId = p.routeId        // ✅ 추가 (타입이 Long? 이어야 함)
             )
         }
 
@@ -1109,6 +1110,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     intent.putExtra("userName", userName)
                                     intent.putExtra("imageUri", post.imageUri)
                                     intent.putExtra("docId", post.docId)
+                                    post.routeId?.let { intent.putExtra("routeId", it) }
                                     context.startActivity(intent)
                                 },
                             shape = RoundedCornerShape(18.dp),
@@ -1355,7 +1357,8 @@ data class Post(
     val pace: String? = null,
     val durationText: String? = null,
     val calories: Double? = null,
-    val docId: String? = null
+    val docId: String? = null,
+    val routeId: Long? = null
 )
 fun logoutAll(
     context: Context,
@@ -1560,6 +1563,79 @@ private fun MapRoutePreview(
     }
 
     // 실제 뷰 렌더
+    AndroidView(
+        modifier = modifier,
+        factory = { mapView }
+    )
+}
+@Composable
+fun RouteMapByRouteDetail(
+    routeDetail: com.example.runningspot.data.remote.RouteDetailDto?,
+    modifier: Modifier = Modifier,
+    zoomLevel: Int = 15
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val mapView = remember { MapView(context) }
+    var kakaoMap by remember { mutableStateOf<KakaoMap?>(null) }
+
+    DisposableEffect(lifecycleOwner, mapView) {
+        val obs = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) { mapView.resume() }
+            override fun onPause(owner: LifecycleOwner) { mapView.pause() }
+            override fun onDestroy(owner: LifecycleOwner) { mapView.finish() }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            runCatching { mapView.finish() }
+        }
+    }
+
+    val points = routeDetail?.points.orEmpty()
+
+    val readyCb = remember(points) {
+        object : KakaoMapReadyCallback() {
+            override fun onMapReady(map: KakaoMap) {
+                kakaoMap = map
+
+                if (points.size > 1) {
+                    val routePts = points.map { LatLng.from(it.lat, it.lng) }
+
+                    map.routeLineManager?.let { manager ->
+                        val layer = manager.layer
+                        val style = RouteLineStyle.from(8f, android.graphics.Color.BLUE)
+                        val styles = RouteLineStyles.from(style)
+                        val seg = RouteLineSegment.from(routePts).setStyles(styles)
+                        val options = RouteLineOptions.from(seg)
+                        layer.addRouteLine(options).show()
+                    }
+
+                    val avgLat = routePts.map { it.latitude }.average()
+                    val avgLng = routePts.map { it.longitude }.average()
+                    map.moveCamera(
+                        CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng))
+                    )
+                }
+            }
+
+            override fun getPosition(): LatLng = LatLng.from(
+                points.firstOrNull()?.lat ?: 0.0,
+                points.firstOrNull()?.lng ?: 0.0
+            )
+
+            override fun getZoomLevel(): Int = zoomLevel
+        }
+    }
+
+    LaunchedEffect(mapView, points) {
+        mapView.start(object : MapLifeCycleCallback() {
+            override fun onMapDestroy() {}
+            override fun onMapError(error: Exception?) { error?.printStackTrace() }
+        }, readyCb)
+    }
+
     AndroidView(
         modifier = modifier,
         factory = { mapView }

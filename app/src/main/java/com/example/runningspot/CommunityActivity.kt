@@ -1,11 +1,13 @@
 package com.example.runningspot
 
 import android.app.Activity
+import android.app.ProgressDialog.show
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,6 +56,11 @@ import com.example.runningspot.ui.CrewChatScreen
 import com.example.runningspot.data.CrewRepository
 import com.google.firebase.storage.FirebaseStorage
 import java.util.UUID
+import com.example.runningspot.data.repository.fetchRouteDetail
+import com.example.runningspot.data.remote.RouteSummary
+import com.example.runningspot.data.repository.fetchMyRoutes
+import com.example.runningspot.ui.RouteMapByRouteDetail
+import com.example.runningspot.viewmodel.RouteDetailViewModel
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,6 +117,7 @@ class CommunityActivity : ComponentActivity() {
             val pace = intent.getStringExtra("pace")
             val calories = intent.getDoubleExtra("calories", Double.NaN).takeIf { !it.isNaN() }
             val docId = intent.getStringExtra("docId")
+            val routeId = intent.getLongExtra("routeId", -1L).let { if (it == -1L) null else it }
             setContent {
                 CommunityDetailScreen(
                     title = title,
@@ -127,6 +135,7 @@ class CommunityActivity : ComponentActivity() {
                     durationText = durationText,
                     calories = calories,
                     docId = docId,
+                    routeId = routeId,
                     onUpdateStats = { likes, comments ->
                         prefs.edit()
                             .putInt("likes_$postId", likes)
@@ -314,32 +323,36 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
             )
 
             Spacer(Modifier.height(16.dp))
-            var showRunPicker by remember { mutableStateOf(false) }
-            val runList = remember { loadLatestRun(context) }
-            Button(onClick = { showRunPicker = true }) {
-                Text("러닝 기록 선택하기")
+            var selectedRoute by remember { mutableStateOf<RouteSummary?>(null) }
+            var routeList by remember { mutableStateOf<List<RouteSummary>>(emptyList()) }
+            var showPicker by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            Button(onClick = {
+                scope.launch {
+                    try {
+                        routeList = fetchMyRoutes("http://10.0.2.2:4000") // 에뮬레이터
+                        showPicker = true
+                    } catch (e: Exception) {
+                        Log.e("POST", "fetch routes fail", e)
+                    }
+                }
+            }) {
+                Text("러닝기록(루트) 불러오기")
             }
-            if (showRunPicker) {
+            if (showPicker) {
+                // 간단 Dialog 예시(바텀시트로 바꿔도 됨)
                 AlertDialog(
-                    onDismissRequest = { showRunPicker = false },
-                    title = { Text("러닝 기록 선택") },
+                    onDismissRequest = { showPicker = false },
+                    title = { Text("내 루트 선택") },
                     text = {
                         Column {
-                            runList.forEach { run ->
-                                Text(
-                                    text = "거리 ${"%.2f".format(run.distanceM / 1000)} km / 시간 ${
-                                        formatDuration(
-                                            run.durationMs
-                                        )
-                                    }",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            selectedRun = run
-                                            showRunPicker = false
-                                        }
-                                        .padding(12.dp)
-                                )
+                            routeList.forEach { r ->
+                                TextButton(onClick = {
+                                    selectedRoute = r
+                                    showPicker = false
+                                }) {
+                                    Text("${r.title} • ${r.distance_m}m")
+                                }
                             }
                         }
                     },
@@ -413,6 +426,8 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                                     "calories" to calcCalories(r.distanceM)
                                 )
                             }),
+                            "routeId" to selectedRoute?.id,
+                            "routeTitle" to selectedRoute?.title,
 
                             "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp(),
@@ -485,9 +500,8 @@ fun CommunityDetailScreen(
     pace: String?,
     calories: Double?,
     onUpdateStats: (Int, Int) -> Unit,
-    docId: String?
-
-
+    docId: String?,
+    routeId: Long?
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -502,6 +516,13 @@ fun CommunityDetailScreen(
         )
     }
     var newComment by remember { mutableStateOf("") }
+    val routeVm: RouteDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val routeDetail by routeVm.route.collectAsState()
+    val routeError by routeVm.error.collectAsState()
+
+    LaunchedEffect(routeId) {
+        routeId?.let { routeVm.loadRouteDetail(it) }
+    }
     LaunchedEffect(docId) {
         val safeDocId = docId ?: return@LaunchedEffect
         try {
@@ -620,6 +641,19 @@ fun CommunityDetailScreen(
                     }
                 }
                 Spacer(Modifier.height(20.dp))
+            }
+            if (routeId != null) {
+                Spacer(Modifier.height(12.dp))
+
+                RouteMapByRouteDetail(
+                    routeDetail = routeDetail,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+
+                Spacer(Modifier.height(12.dp))
             }
 
             // 좋아요/댓글 카운트 UI (원본 유지)
