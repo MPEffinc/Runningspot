@@ -25,6 +25,9 @@ import com.example.runningspot.R
 import com.example.runningspot.data.remote.ApiClient
 import com.example.runningspot.data.remote.KakaoAuthRequest
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import okhttp3.OkHttpClient
@@ -181,6 +184,22 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 .signInWithCustomToken(resp.customToken)
                                 .await()
 
+                            val firebaseUser = FirebaseAuth.getInstance().currentUser
+                                ?: throw IllegalStateException("Firebase currentUser가 null")
+
+                            FirebaseFirestore.getInstance()
+                                .collection("users")
+                                .document(firebaseUser.uid)
+                                .set(
+                                    mapOf(
+                                        "nickname" to (nickname ?: "사용자"),
+                                        "profileUrl" to profileUrl,
+                                        "provider" to "kakao",
+                                        "updatedAt" to FieldValue.serverTimestamp()
+                                    ),
+                                    SetOptions.merge()
+                                )
+                                .await()
                             // Firebase ID Token 발급 (중요: customToken이 아니라 idToken을 서버에 보냄)
                             val idToken = FirebaseAuth.getInstance()
                                 .currentUser

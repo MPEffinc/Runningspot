@@ -967,9 +967,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                 scope.launch {
                                     try {
                                         crewRepo.joinCrew(crew.id)
-
-                                        // 🔄 다시 불러오기
                                         crews = crewRepo.fetchCrews()
+                                        openChat(crew.id)
 
                                     } catch (e: Exception) {
                                         Toast.makeText(

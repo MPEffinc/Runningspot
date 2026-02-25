@@ -1,7 +1,6 @@
 package com.example.runningspot
 
 import android.app.Activity
-import android.app.ProgressDialog.show
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -121,7 +120,7 @@ class CommunityActivity : ComponentActivity() {
             setContent {
                 CommunityDetailScreen(
                     title = title,
-                    hashtags = listOf("러닝", "오전", "3Km"),
+                    hashtags = listOf("러닝"),
                     authorName = authorName,
                     userName = userName,
                     content = content,
@@ -223,25 +222,36 @@ fun CrewWriteScreen(userName: String) {
                     }
 
                     val db = FirebaseFirestore.getInstance()
-                    val data = hashMapOf(
-                        "title" to title.trim(),
-                        "location" to location.trim(),
-                        "description" to description.trim(),
-                        "userId" to user.uid,
-                        "maxMembers" to maxMembers,
-                        "currentMembers" to 0L,
-                        "createdAt" to FieldValue.serverTimestamp()
-                    )
+                    val crewRef = db.collection("crews").document()   // ✅ ID를 미리 확보
+                    val crewId = crewRef.id
+                    val memberRef = crewRef.collection("members").document(user.uid)
 
-                    db.collection("crews")
-                        .add(data)
-                        .addOnSuccessListener {
-                            Toast.makeText(context, "크루 모집글 등록 완료", Toast.LENGTH_SHORT).show()
-                            (context as? Activity)?.finish()
-                        }
-                        .addOnFailureListener { e ->
-                            Toast.makeText(context, "등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                    db.runBatch { batch ->
+                        batch.set(crewRef, hashMapOf(
+                            "title" to title.trim(),
+                            "location" to location.trim(),
+                            "description" to description.trim(),
+                            "userId" to user.uid,
+                            "maxMembers" to maxMembers,
+                            "currentMembers" to 1L, // ✅ 방장 포함
+                            "createdAt" to FieldValue.serverTimestamp(),
+
+                            // (선택) 크루 목록에서 마지막 메시지 보여주기 위한 필드
+                            "lastMessage" to "",
+                            "lastMessageAt" to FieldValue.serverTimestamp()
+                        ))
+
+                        // ✅ 방장 멤버 등록
+                        batch.set(memberRef, mapOf(
+                            "role" to "owner",
+                            "joinedAt" to FieldValue.serverTimestamp()
+                        ))
+                    }.addOnSuccessListener {
+                        Toast.makeText(context, "크루 모집글 등록 완료", Toast.LENGTH_SHORT).show()
+                        (context as? Activity)?.finish()
+                    }.addOnFailureListener { e ->
+                        Toast.makeText(context, "등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
