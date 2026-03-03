@@ -48,9 +48,12 @@ import android.telecom.VideoProfile.isPaused
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import androidx.lifecycle.lifecycleScope
+import com.example.runningspot.data.remote.ApiClient
 import com.google.android.material.button.MaterialButton
 import com.example.runningspot.ui.getCircularBitmap
 import com.kakao.vectormap.GestureType
+import kotlinx.coroutines.launch
 
 
 class RunningActivity : ComponentActivity() {
@@ -61,6 +64,8 @@ class RunningActivity : ComponentActivity() {
     // 지도 관련
     private lateinit var mapView: MapView
     private var kakaoMap: KakaoMap? = null
+    private var followRouteId: Long = -1L
+    private var guideRoute: RouteLine? = null
 
     // 경로 표시용
     private var currentRoute: RouteLine? = null
@@ -70,8 +75,8 @@ class RunningActivity : ComponentActivity() {
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
     private var isRunning = false
-    private var userMarkerBitmap: Bitmap? = null
 
+    private var userMarkerBitmap: Bitmap? = null
     private var isPaused = false
     private var autoFollow = true
     // 상단 UI (거리/시간)
@@ -258,6 +263,41 @@ class RunningActivity : ComponentActivity() {
             override fun getZoomLevel(): Int = 15
         })
     }
+    private fun drawGuideRouteOnce(map: KakaoMap, routeId: Long) {
+        lifecycleScope.launch {
+            try {
+                val detail = ApiClient.routeApi.getRouteDetail(routeId) // GET /routes/{id}
+
+                val pts = detail.points
+                    .sortedBy { it.seq } // seq 필수
+                    .map { LatLng.from(it.lat, it.lng) }
+
+                if (pts.size < 2) return@launch
+
+                val manager = map.routeLineManager ?: return@launch
+                val layer = manager.layer
+
+                // 이전 가이드 라인 있으면 제거
+                runCatching { guideRoute?.let { layer.remove(it) } }
+
+                // 가이드 라인은 빨강(또는 회색) 추천
+                val style = RouteLineStyle.from(10f, Color.RED)
+                val styles = RouteLineStyles.from(style)
+                val seg = RouteLineSegment.from(pts).setStyles(styles)
+                val options = RouteLineOptions.from(seg)
+
+                guideRoute = layer.addRouteLine(options).apply { show() }
+
+                // (선택) 시작 지점으로 한번 카메라 이동
+                // map.moveCamera(CameraUpdateFactory.newCenterPosition(pts.first()))
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this@RunningActivity, "가이드 루트 불러오기 실패", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     //마커 비트맵 조정 함수
     private fun loadUserRunningMarkerBitmap(context: Context, uriStr: String): Bitmap? {
         return try {

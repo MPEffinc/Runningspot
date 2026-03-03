@@ -124,6 +124,11 @@ import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.viewmodel.RouteViewModel
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.tasks.await
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -1299,6 +1304,77 @@ fun MyPageScreen(
     onShowInfo: () -> Unit
 ) {
     val context = LocalContext.current
+
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    val db = remember { FirebaseFirestore.getInstance() }
+    val storage = remember { FirebaseStorage.getInstance() }
+    val scope = rememberCoroutineScope()
+
+    var loading by remember { mutableStateOf(false) }
+
+    // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
+    var profileUrlFromDb by remember { mutableStateOf<String?>(null) }
+
+    // ✅ 최초 진입 시 users/{uid}.profileUrl 읽기
+    LaunchedEffect(uid) {
+        if (uid == null) return@LaunchedEffect
+        try {
+            val doc = db.collection("users").document(uid).get().await()
+            profileUrlFromDb = doc.getString("profileUrl")
+        } catch (_: Exception) {
+            // 실패해도 그냥 기본 프로필(userProfile)로 보여주면 됨
+        }
+    }
+
+    // ✅ 현재 화면에 보여줄 프로필 URL 결정
+    val displayProfileUrl = profileUrlFromDb ?: userProfile
+
+    // ✅ 갤러리에서 사진 선택 → 업로드 → users/{uid}.profileUrl 갱신
+    val pickImage = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (uid == null) {
+            Toast.makeText(context, "로그인이 필요합니다", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        scope.launch {
+            try {
+                loading = true
+
+                // 1) Storage 업로드
+                val ref = storage.reference
+                    .child("profileImages/$uid/profile_${System.currentTimeMillis()}.jpg")
+
+                ref.putFile(uri).await()
+
+                // 2) 다운로드 URL
+                val downloadUrl = ref.downloadUrl.await().toString()
+
+                // 3) Firestore users 업데이트
+                db.collection("users").document(uid)
+                    .set(
+                        mapOf(
+                            "profileUrl" to downloadUrl,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+
+                // 4) 화면 즉시 반영
+                profileUrlFromDb = downloadUrl
+
+                Toast.makeText(context, "프로필 사진이 변경됐어요", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "변경 실패: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                loading = false
+            }
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -1311,9 +1387,9 @@ fun MyPageScreen(
         ) {
             Spacer(modifier = Modifier.height(20.dp))
 
-            if (userProfile != null) {
+            if (displayProfileUrl != null) {
                 Image(
-                    painter = rememberAsyncImagePainter(userProfile),
+                    painter = rememberAsyncImagePainter(displayProfileUrl),
                     contentDescription = "Profile",
                     modifier = Modifier
                         .size(100.dp)
@@ -1334,9 +1410,20 @@ fun MyPageScreen(
             Text(userName ?: "로그인 정보 없음", style = MaterialTheme.typography.titleMedium)
             Text(provider?.uppercase() ?: "", color = Color.Gray)
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // ✅ 추가: 프로필 사진 변경 버튼
             Button(
-                onClick = { logoutAll(context, provider) { onLogout()} },
+                enabled = (uid != null && !loading),
+                onClick = { pickImage.launch("image/*") }
+            ) {
+                Text(if (loading) "업로드 중..." else "프로필 사진 변경")
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = { logoutAll(context, provider) { onLogout() } },
                 colors = ButtonDefaults.buttonColors(Color.Red)
             ) {
                 Text("로그아웃", color = Color.White)
@@ -1344,9 +1431,7 @@ fun MyPageScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            Button(
-                onClick = onShowInfo
-            ) {
+            Button(onClick = onShowInfo) {
                 Text("앱 정보")
             }
         }
