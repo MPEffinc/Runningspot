@@ -98,6 +98,8 @@ import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
+import com.kakao.vectormap.label.LabelTextStyle
+import com.kakao.vectormap.label.LabelTextBuilder
 import com.kakao.vectormap.route.RouteLine
 import com.kakao.vectormap.route.RouteLineManager
 import com.kakao.vectormap.route.RouteLineOptions
@@ -114,9 +116,9 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
+import com.google.firebase.auth.FirebaseAuth
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.firebase.FirebaseAuth
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.data.CrewRepository
 import kotlinx.coroutines.launch
@@ -124,7 +126,7 @@ import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.viewmodel.RouteViewModel
-import com.google.firebase.auth.FirebaseAuth
+import com.example.runningspot.data.remote.NearbyRouteDto
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -136,7 +138,6 @@ private data class RunSummaryRef(
     val endAt: Long,
     val fileName: String // 내부 저장소에 저장된 경로 파일명
 )
-
 private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef, maxKeep: Int = 200) {
     val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
     val old = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
@@ -229,6 +230,7 @@ fun MainScreen(
     provider: String?,
     onLogout: () -> Unit
 ) {
+    val viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var selectedTab by remember { mutableStateOf(2) } // 기본 러닝 탭 선택
 
     val context = LocalContext.current
@@ -305,6 +307,7 @@ fun MainScreen(
             )
             2 -> RunningScreen(
                 padding = padding,
+                viewModel = viewModel,
                 onRunResult = { distance, duration, pathPairs ->
                     val endAt = System.currentTimeMillis()
                     // 1) 경로 파일 저장
@@ -381,8 +384,12 @@ fun getCircularBitmap(bitmap: Bitmap): Bitmap {
 @Composable
 fun RunningScreen(
     padding: PaddingValues,
+    viewModel: RouteViewModel,
     onRunResult: (Double, Long, List<Pair<Double, Double>>) -> Unit = { _, _, _ -> }
 ) {
+    // 주변 루트 리스트 관찰
+    val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
+
     val context = LocalContext.current
     val activity = context as ComponentActivity
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -397,15 +404,13 @@ fun RunningScreen(
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
 
-
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         hasLocationPermission =
             result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                     result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        // 권한 승인 후 바로 초기 중심 설정
-        tryInitCenter(context,fusedLocationClient, kakaoMap, hasLocationPermission)
+        tryInitCenter(context, fusedLocationClient, kakaoMap, hasLocationPermission)
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -434,7 +439,6 @@ fun RunningScreen(
                         data.getDoubleExtra("lng_$i", 0.0)
                     )
                 }
-                // ✅ 지도 위에 다시 그리기
                 kakaoMap?.routeLineManager?.let { manager ->
                     val layer = manager.layer
                     val style = RouteLineStyle.from(8f, android.graphics.Color.BLUE)
@@ -447,8 +451,6 @@ fun RunningScreen(
         }
     }
 
-
-    // 최초 권한 요청
     LaunchedEffect(Unit) {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -477,18 +479,19 @@ fun RunningScreen(
         }
     }
 
-
     val readyCb = remember {
         object : KakaoMapReadyCallback() {
             override fun onMapReady(map: KakaoMap) {
                 Log.d("RUNNINGSPOTDEBUG", "KakaoMap Ready.")
                 kakaoMap = map
 
-                // 권한이 있으면 즉시 현재 위치로 이동
                 if (hasLocationPermission) {
                     getSingleFix(fusedLocationClient) { lat, lng ->
                         moveCameraTo(map, lat, lng)
                         updateCurrentLabel(context, map, lat, lng)
+
+                        // 내 위치를 주변 루트를 달라고 요청
+                        viewModel.loadNearbyRoutes(lat, lng)
                     }
                 }
             }
@@ -506,22 +509,14 @@ fun RunningScreen(
             }
         }, readyCb)
     }
-    LaunchedEffect(userMarkerImageUri) {
-        val map = kakaoMap
-        if (map != null && userMarkerImageUri != null) {
-            // 위치 권한이 있고 맵이 준비되었으면 현재 위치로 라벨 갱신
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                getSingleFix(fusedLocationClient) { lat, lng ->
-                    updateCurrentLabel(context, map, lat, lng)
-                }
-            } else {
-                // 권한 없으면 권한 요청을 유도하거나 무시
-            }
+
+    //nearbyRoutes 데이터를 받아오면 지도에 마커
+    LaunchedEffect(nearbyRoutes, kakaoMap) {
+        if (nearbyRoutes.isNotEmpty() && kakaoMap != null) {
+            showNicknameMarkers(kakaoMap!!, nearbyRoutes)
         }
     }
 
-    // ✅ 위치 콜백 (러닝 중 이동경로 추적)
     val locationCallback = remember {
         object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
@@ -541,28 +536,6 @@ fun RunningScreen(
         }
     }
 
-    // ✅ 러닝 시작/종료 함수
-    fun startRunning() {
-        if (!hasLocationPermission) {
-            Toast.makeText(context, "위치 권한이 필요합니다.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        runningPath.clear()
-        isRunning = true
-        val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 2000L
-        ).build()
-        fusedLocationClient.requestLocationUpdates(request, locationCallback, android.os.Looper.getMainLooper())
-        Toast.makeText(context, "러닝 시작!", Toast.LENGTH_SHORT).show()
-    }
-
-    fun stopRunning() {
-        isRunning = false
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        Toast.makeText(context, "러닝 종료!", Toast.LENGTH_SHORT).show()
-    }
-
-    // ===== UI =====
     Box(
         Modifier
             .fillMaxSize()
@@ -582,15 +555,14 @@ fun RunningScreen(
 
         FloatingActionButton(
             onClick = {
-                Toast.makeText(context, "현재 위치 불러오는 중...", Toast.LENGTH_SHORT).show()
                 val map = kakaoMap ?: return@FloatingActionButton
-                Log.d("RUNNINGSPOTDEBUG", "Change View: Current Location")
                 if (hasLocationPermission) {
                     getSingleFix(fusedLocationClient) { lat, lng ->
-                        Log.d("RUNNINGSPOTDEBUG", "SingleFix: $lat, $lng")
-                        Toast.makeText(context, "현재 위치: $lat, $lng", Toast.LENGTH_SHORT).show()
                         moveCameraTo(map, lat, lng)
                         updateCurrentLabel(context, map, lat, lng)
+
+                        // 🚨 [추가됨] 현재 위치 버튼을 눌렀을 때도 주변 루트를 갱신합니다.
+                        viewModel.loadNearbyRoutes(lat, lng)
                     }
                 } else {
                     permissionLauncher.launch(
@@ -607,7 +579,6 @@ fun RunningScreen(
             containerColor = MaterialTheme.colorScheme.primary
         ) { Text("현재 위치") }
 
-        // 러닝 시작 버튼
         FloatingActionButton(
             onClick = {
                 val intent = Intent(context, RunningActivity::class.java)
@@ -618,6 +589,39 @@ fun RunningScreen(
                 .padding(16.dp),
             containerColor = MaterialTheme.colorScheme.primary
         ) { Text("러닝 시작") }
+    }
+}
+
+// 주변 루트 마커 띄워주는 함수
+private fun showNicknameMarkers(kakaoMap: KakaoMap, routes: List<com.example.runningspot.data.remote.NearbyRouteDto>) {
+    val labelManager = kakaoMap.labelManager ?: return
+    val layer = labelManager.layer ?: return
+
+    // 기존에 그려진 추천 마커들이 있다면 싹 지우고 새로 그리기
+    layer.removeAll()
+
+    kakaoMap.setOnLabelClickListener { _, _, label ->
+        val clickedRouteId = label.tag as? Long
+        if (clickedRouteId != null) {
+            println("클릭된 루트 ID: $clickedRouteId")
+        }
+        true
+    }
+
+    routes.forEach { route ->
+        val pos = LatLng.from(route.start_lat, route.start_lng)
+
+        val style = LabelStyle.from(com.example.runningspot.R.drawable.ic_launcher_foreground) // 👈 본인 프로젝트의 아이콘으로 맞춰주세요
+            .setTextStyles(LabelTextStyle.from(35, android.graphics.Color.BLUE))
+
+        val nicknameText = route.nickname ?: "이름 없음"
+
+        val options = LabelOptions.from(pos)
+            .setStyles(style)
+            .setTexts(LabelTextBuilder().setTexts(nicknameText))
+            .setTag(route.id)
+
+        layer.addLabel(options)
     }
 }
 
@@ -1298,6 +1302,15 @@ fun MyPageScreen(
     onShowInfo: () -> Unit
 ) {
     val context = LocalContext.current
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedImageUri = uri // 사진을 고르면 여기에 저장됨
+            Toast.makeText(context, "사진이 선택되었습니다!", Toast.LENGTH_SHORT).show()
+        }
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -1348,7 +1361,24 @@ fun MyPageScreen(
             ) {
                 Text("앱 정보")
             }
+
+            if (selectedImageUri != null) {
+                Text("선택된 이미지 경로: $selectedImageUri", fontSize = 12.sp)
+            } else {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                    contentDescription = "기본 프로필",
+                    modifier = Modifier.size(100.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = {
+                photoPickerLauncher.launch("image/*") // "이미지 파일만 보여줘" 라는 뜻
+            }) {
+                Text("프로필(마커) 사진 변경")
+            }
         }
+
     }
 }
 
