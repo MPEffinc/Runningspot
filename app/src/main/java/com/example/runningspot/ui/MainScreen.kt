@@ -105,6 +105,7 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -123,6 +124,9 @@ import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.collectAsState
+import com.android.tools.build.jetifier.core.utils.Log.e
+import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.data.remote.NearbyRouteDto
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -400,6 +404,7 @@ fun RunningScreen(
     val runningPath = remember { mutableStateListOf<LatLng>() }
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -1305,36 +1310,58 @@ fun MyPageScreen(
 ) {
     val context = LocalContext.current
 
-    val uid = FirebaseAuth.getInstance().currentUser?.uid
     val db = remember { FirebaseFirestore.getInstance() }
     val storage = remember { FirebaseStorage.getInstance() }
     val scope = rememberCoroutineScope()
+    val auth = remember { FirebaseAuth.getInstance() }
 
     var loading by remember { mutableStateOf(false) }
+    var nicknameFromDb by remember { mutableStateOf<String?>(null) }
+    var uid by remember { mutableStateOf(auth.currentUser?.uid) }
 
     // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
     var profileUrlFromDb by remember { mutableStateOf<String?>(null) }
 
-    // ✅ 최초 진입 시 users/{uid}.profileUrl 읽기
-    LaunchedEffect(uid) {
-        if (uid == null) return@LaunchedEffect
-        try {
-            val doc = db.collection("users").document(uid).get().await()
-            profileUrlFromDb = doc.getString("profileUrl")
-        } catch (_: Exception) {
-            // 실패해도 그냥 기본 프로필(userProfile)로 보여주면 됨
+    DisposableEffect(Unit) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            uid = firebaseAuth.currentUser?.uid
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
         }
     }
 
+    // ✅ 최초 진입 시 users/{uid}.profileUrl 읽기
+    LaunchedEffect(uid) {
+        val currentUid = uid ?: return@LaunchedEffect
+        try {
+            val doc = db.collection("users").document(currentUid).get().await()
+            nicknameFromDb = doc.getString("nickname")
+            profileUrlFromDb = doc.getString("profileUrl")
+        } catch (e: Exception) {
+            Log.e("MyPageScreen", "유저 정보 불러오기 실패", e)
+            // 실패해도 그냥 기본 프로필(userProfile)로 보여주면 됨
+        }
+    }
+    val displayName =
+        nicknameFromDb?.takeIf { it.isNotBlank() }
+            ?: userName?.takeIf { it.isNotBlank() }
+            ?: "로그인 정보 없음"
     // ✅ 현재 화면에 보여줄 프로필 URL 결정
-    val displayProfileUrl = profileUrlFromDb ?: userProfile
+    val displayProfileUrl = when {
+        !profileUrlFromDb.isNullOrBlank() -> profileUrlFromDb
+        !userProfile.isNullOrBlank() -> userProfile
+        else -> null
+    }
 
     // ✅ 갤러리에서 사진 선택 → 업로드 → users/{uid}.profileUrl 갱신
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        if (uid == null) {
+        val currentUid = uid
+        if (currentUid == null) {
             Toast.makeText(context, "로그인이 필요합니다", Toast.LENGTH_SHORT).show()
             return@rememberLauncherForActivityResult
         }
@@ -1345,7 +1372,7 @@ fun MyPageScreen(
 
                 // 1) Storage 업로드
                 val ref = storage.reference
-                    .child("profileImages/$uid/profile_${System.currentTimeMillis()}.jpg")
+                    .child("profileImages/$currentUid/profile_${System.currentTimeMillis()}.jpg")
 
                 ref.putFile(uri).await()
 
@@ -1353,7 +1380,7 @@ fun MyPageScreen(
                 val downloadUrl = ref.downloadUrl.await().toString()
 
                 // 3) Firestore users 업데이트
-                db.collection("users").document(uid)
+                db.collection("users").document(currentUid)
                     .set(
                         mapOf(
                             "profileUrl" to downloadUrl,
@@ -1368,6 +1395,7 @@ fun MyPageScreen(
 
                 Toast.makeText(context, "프로필 사진이 변경됐어요", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                Log.e("PROFILE_DEBUG", "프로필 사진 업로드 실패", e)
                 Toast.makeText(context, "변경 실패: ${e.message}", Toast.LENGTH_LONG).show()
             } finally {
                 loading = false
@@ -1404,10 +1432,11 @@ fun MyPageScreen(
                 ) {
                     Text("🙂", fontSize = MaterialTheme.typography.headlineMedium.fontSize)
                 }
+                Text("🙂")
             }
 
             Spacer(Modifier.height(12.dp))
-            Text(userName ?: "로그인 정보 없음", style = MaterialTheme.typography.titleMedium)
+            Text(displayName, style = MaterialTheme.typography.titleMedium)
             Text(provider?.uppercase() ?: "", color = Color.Gray)
 
             Spacer(Modifier.height(16.dp))
