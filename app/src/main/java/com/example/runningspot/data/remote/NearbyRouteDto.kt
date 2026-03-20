@@ -5,5 +5,6 @@ data class NearbyRouteDto(
     val title: String,      // 루트 이름/제목
     val distance_m: Double, // 루트 총 거리(미터)
     val start_lat: Double,  // 시작 지점 위도
-    val start_lng: Double   // 시작 지점 경도
+    val start_lng: Double,   // 시작 지점 경도
+    val profile_image_url: String?
 )

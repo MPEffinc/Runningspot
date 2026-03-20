@@ -187,18 +187,26 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                             val firebaseUser = FirebaseAuth.getInstance().currentUser
                                 ?: throw IllegalStateException("Firebase currentUser가 null")
 
+                            val currentNickname = nickname
+                            val currentProfileUrl = profileUrl
+
+                            val userData = mutableMapOf<String, Any>(
+                                "provider" to "kakao",
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+
+                            if (!currentNickname.isNullOrBlank()) {
+                                userData["nickname"] = currentNickname
+                            }
+
+                            if (!currentProfileUrl.isNullOrBlank()) {
+                                userData["profileUrl"] = currentProfileUrl
+                            }
+
                             FirebaseFirestore.getInstance()
                                 .collection("users")
                                 .document(firebaseUser.uid)
-                                .set(
-                                    mapOf(
-                                        "nickname" to (nickname ?: "사용자"),
-                                        "profileUrl" to profileUrl,
-                                        "provider" to "kakao",
-                                        "updatedAt" to FieldValue.serverTimestamp()
-                                    ),
-                                    SetOptions.merge()
-                                )
+                                .set(userData, SetOptions.merge())
                                 .await()
                             // Firebase ID Token 발급 (중요: customToken이 아니라 idToken을 서버에 보냄)
                             val idToken = FirebaseAuth.getInstance()
@@ -206,10 +214,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 ?.getIdToken(true)
                                 ?.await()
                                 ?.token
-
-                            if (idToken == null) {
-                                throw IllegalStateException("Firebase ID Token 발급 실패")
-                            }
+                                ?: throw IllegalStateException("Firebase ID Token 발급 실패")
 
                             // /me 호출 -> 서버가 MySQL users에 생성/조회
                             val me = ApiClient.authApi.me("Bearer $idToken")
@@ -219,7 +224,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                             val uid = FirebaseAuth.getInstance().currentUser?.uid
                             Log.d("AUTH", "Firebase signIn success uid=$uid")
 
-                            onLoginSuccess(nickname, profileUrl, provider!!)
+                            onLoginSuccess(nickname, currentProfileUrl, provider!!)
                         } catch (e: Exception) {
                             Log.e("AUTH", "Firebase custom token login failed", e)
                             Toast.makeText(
