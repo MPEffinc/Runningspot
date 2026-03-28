@@ -340,7 +340,7 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
             Button(onClick = {
                 scope.launch {
                     try {
-                        routeList = fetchMyRoutes("http://10.0.2.2:4000") // 에뮬레이터
+                        routeList = fetchMyRoutes("http://3.39.10.184:4000") // 에뮬레이터
                         showPicker = true
                     } catch (e: Exception) {
                         Log.e("POST", "fetch routes fail", e)

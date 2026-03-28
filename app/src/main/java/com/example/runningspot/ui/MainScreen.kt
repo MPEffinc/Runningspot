@@ -113,6 +113,13 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -123,6 +130,7 @@ import com.example.runningspot.data.CrewRepository
 import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
 import com.android.tools.build.jetifier.core.utils.Log.e
 import com.example.runningspot.data.remote.ApiClient
@@ -133,6 +141,9 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.tasks.await
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -1272,6 +1283,20 @@ data class Post(
     val docId: String? = null,
     val routeId: Long? = null
 )
+data class MyPagePostItem(
+    val id: String,                 // Firestore docId
+    val title: String,
+    val authorName: String,
+    val content: String,
+    val imageUrl: String? = null,
+    val likeCount: Int = 0,
+    val commentCount: Int = 0,
+    val routeId: Long? = null,
+    val distanceKm: Double? = null,
+    val durationText: String? = null,
+    val pace: String? = null,
+    val calories: Double? = null
+)
 fun logoutAll(
     context: Context,
     provider: String?,
@@ -1318,10 +1343,11 @@ fun MyPageScreen(
     var loading by remember { mutableStateOf(false) }
     var nicknameFromDb by remember { mutableStateOf<String?>(null) }
     var uid by remember { mutableStateOf(auth.currentUser?.uid) }
-
     // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
     var profileUrlFromDb by remember { mutableStateOf<String?>(null) }
-
+    var showMenu by remember { mutableStateOf(false) }
+    var myPosts by remember { mutableStateOf<List<MyPagePostItem>>(emptyList()) }
+    var postsLoading by remember { mutableStateOf(true) }
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             uid = firebaseAuth.currentUser?.uid
@@ -1353,6 +1379,41 @@ fun MyPageScreen(
         !profileUrlFromDb.isNullOrBlank() -> profileUrlFromDb
         !userProfile.isNullOrBlank() -> userProfile
         else -> null
+    }
+    LaunchedEffect(uid) {
+        val currentUid = uid ?: return@LaunchedEffect
+        postsLoading = true
+        try {
+            val snap = db.collection("posts")
+                .whereEqualTo("userId", currentUid)
+                .get()
+                .await()
+
+            myPosts = snap.documents.map { doc ->
+                val imageUrls = doc.get("imageUrls") as? List<*>
+                val runSummary = doc.get("runSummary") as? Map<*, *>
+
+                MyPagePostItem(
+                    id = doc.id,
+                    title = (doc.getString("content") ?: "").take(18),
+                    authorName = doc.getString("userName") ?: displayName,
+                    content = doc.getString("content") ?: "",
+                    imageUrl = imageUrls?.firstOrNull() as? String,
+                    likeCount = (doc.getLong("likeCount") ?: 0L).toInt(),
+                    commentCount = (doc.getLong("commentCount") ?: 0L).toInt(),
+                    routeId = doc.getLong("routeId"),
+                    distanceKm = (runSummary?.get("distanceKm") as? Number)?.toDouble(),
+                    durationText = runSummary?.get("durationText") as? String,
+                    pace = runSummary?.get("pace") as? String,
+                    calories = (runSummary?.get("calories") as? Number)?.toDouble()
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("MyPageScreen", "내 게시글 불러오기 실패", e)
+            myPosts = emptyList()
+        } finally {
+            postsLoading = false
+        }
     }
 
     // ✅ 갤러리에서 사진 선택 → 업로드 → users/{uid}.profileUrl 갱신
@@ -1404,64 +1465,348 @@ fun MyPageScreen(
     }
 
     Box(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .padding(20.dp)
     ) {
+        // 원래 마이페이지 화면
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
         ) {
-            Spacer(modifier = Modifier.height(20.dp))
+            // 오른쪽 위 메뉴 버튼
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(
+                    onClick = { showMenu = true }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "메뉴"
+                    )
+                }
+            }
 
-            if (displayProfileUrl != null) {
-                Image(
-                    painter = rememberAsyncImagePainter(displayProfileUrl),
-                    contentDescription = "Profile",
-                    modifier = Modifier
-                        .size(100.dp)
-                        .background(Color.Gray, shape = MaterialTheme.shapes.large)
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (displayProfileUrl != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(displayProfileUrl),
+                        contentDescription = "Profile",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(110.dp)
+                            .clip(CircleShape)
+                            .border(2.dp, Color.LightGray, CircleShape)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .clip(CircleShape)
+                            .background(Color.LightGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🙂", fontSize = 36.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = displayName,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
                 )
-            } else {
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = provider?.uppercase() ?: "",
+                    color = Color.Gray,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Text(
+                text = "내 게시글",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (postsLoading) {
                 Box(
                     modifier = Modifier
-                        .size(100.dp)
-                        .background(Color.Gray, shape = MaterialTheme.shapes.large),
+                        .fillMaxWidth()
+                        .padding(top = 30.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🙂", fontSize = MaterialTheme.typography.headlineMedium.fontSize)
+                    Text("게시글 불러오는 중...")
                 }
-                Text("🙂")
+            } else if (myPosts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 30.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("작성한 게시글이 없어요", color = Color.Gray)
+                }
+            } else {
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    verticalItemSpacing = 12.dp,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    items(myPosts, key = { it.id }) { post ->
+                        MyPinterestPostCard(
+                            post = post,
+                            onClick = {
+                                val intent = Intent(context, CommunityActivity::class.java).apply {
+                                    putExtra("postId", post.id.hashCode())
+                                    putExtra("title", post.title)
+                                    putExtra("authorName", post.authorName)
+                                    putExtra("content", post.content)
+                                    putExtra("likes", post.likeCount)
+                                    putExtra("comments", post.commentCount)
+                                    putExtra("imageUri", post.imageUrl)
+                                    putExtra("docId", post.id)
+                                    putExtra("userName", userName)
+
+                                    putExtra("distanceKm", post.distanceKm ?: Double.NaN)
+                                    putExtra("durationText", post.durationText ?: "")
+                                    putExtra("pace", post.pace ?: "")
+                                    putExtra("calories", post.calories ?: Double.NaN)
+
+                                    post.routeId?.let { putExtra("routeId", it) }
+                                }
+                                context.startActivity(intent)
+                            }
+                        )
+                    }
+                }
             }
+        }
 
-            Spacer(Modifier.height(12.dp))
-            Text(displayName, style = MaterialTheme.typography.titleMedium)
-            Text(provider?.uppercase() ?: "", color = Color.Gray)
-
-            Spacer(Modifier.height(16.dp))
-
-            // ✅ 추가: 프로필 사진 변경 버튼
-            Button(
-                enabled = (uid != null && !loading),
-                onClick = { pickImage.launch("image/*") }
+        // 카드형 팝업 메뉴
+        if (showMenu) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() }
+                    ) { showMenu = false }
             ) {
-                Text(if (loading) "업로드 중..." else "프로필 사진 변경")
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 70.dp, end = 16.dp)
+                        .width(280.dp)
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { },
+                    shape = RoundedCornerShape(24.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF111111))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp)
+                    ) {
+                        Text(
+                            text = "더 보기",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            MenuPopupButton(
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "앱 정보",
+                                        tint = Color.White
+                                    )
+                                },
+                                title = "앱 정보",
+                                onClick = {
+                                    showMenu = false
+                                    onShowInfo()
+                                }
+                            )
+
+                            MenuPopupButton(
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = "프로필 변경",
+                                        tint = Color.White
+                                    )
+                                },
+                                title = if (loading) "업로드 중" else "프로필 변경",
+                                onClick = {
+                                    showMenu = false
+                                    if (!loading) pickImage.launch("image/*")
+                                }
+                            )
+
+                            MenuPopupButton(
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Logout,
+                                        contentDescription = "로그아웃",
+                                        tint = Color.White
+                                    )
+                                },
+                                title = "로그아웃",
+                                onClick = {
+                                    showMenu = false
+                                    logoutAll(context, provider) { onLogout() }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+fun MenuPopupButton(
+    icon: @Composable () -> Unit,
+    title: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(72.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF2A2A2A)),
+            contentAlignment = Alignment.Center
+        ) {
+            icon()
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
+    }
+}
+@Composable
+fun MyPinterestPostCard(
+    post: MyPagePostItem,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+
+            // ✅ 1. 이미지 (메인)
+            if (!post.imageUrl.isNullOrBlank()) {
+                Image(
+                    painter = rememberAsyncImagePainter(post.imageUrl),
+                    contentDescription = "게시글 이미지",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(
+                            when ((post.id.hashCode() and 3)) {
+                                0 -> 160.dp
+                                1 -> 200.dp
+                                2 -> 240.dp
+                                else -> 180.dp
+                            }
+                        )
+                )
+            } else {
+                // 이미지 없는 경우 (fallback)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .background(Color(0xFFF0F0F0)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No Image", color = Color.Gray)
+                }
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            Button(
-                onClick = { logoutAll(context, provider) { onLogout() } },
-                colors = ButtonDefaults.buttonColors(Color.Red)
+            // ✅ 2. 아래 한 줄 (좋아요 / 댓글)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("로그아웃", color = Color.White)
-            }
 
-            Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Favorite,
+                        contentDescription = null,
+                        tint = Color(0xFFE57373),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("${post.likeCount}", fontSize = 12.sp)
+                }
 
-            Button(onClick = onShowInfo) {
-                Text("앱 정보")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = Color(0xFF7986CB),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("${post.commentCount}", fontSize = 12.sp)
+                }
             }
         }
     }
