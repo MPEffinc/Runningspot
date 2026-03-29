@@ -114,6 +114,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.firebase.auth.FirebaseAuth
@@ -127,6 +128,12 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.example.runningspot.data.remote.NearbyRouteDto
+
+import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.DirectionsRun
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -390,19 +397,25 @@ fun RunningScreen(
     // 주변 루트 리스트 관찰
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
 
+    val coroutineScope = rememberCoroutineScope() //
+    var selectedRouteId by remember { mutableStateOf<Long?>(null) }
+
     val context = LocalContext.current
-    val activity = context as ComponentActivity
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
     val mapView = remember { MapView(context) }
     var kakaoMap by remember { mutableStateOf<KakaoMap?>(null) }
-
     var hasLocationPermission by remember { mutableStateOf(false) }
     var isRunning by remember { mutableStateOf(false) }
     val runningPath = remember { mutableStateListOf<LatLng>() }
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
+
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(sheetState)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -535,60 +548,112 @@ fun RunningScreen(
             }
         }
     }
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 160.dp, // 하단 시트가 내려가 있을 때 보여줄 높이
+        sheetContainerColor = Color.White,
+        sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        sheetShadowElevation = 20.dp,
+        sheetContent = {
+            // [하단 시트 내부: 추천 루트 리스트]
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .heightIn(min = 500.dp)
+            ) {
+                Spacer(modifier = Modifier.height(12.dp))
+                // 시트 핸들러
+                Box(Modifier.width(40.dp).height(4.dp).background(Color(0xFFE0E0E0), CircleShape).align(Alignment.CenterHorizontally))
+                Spacer(modifier = Modifier.height(24.dp))
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .padding(padding)
-    ) {
-        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+                Text("주변 추천 루트", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color.Black)
+                Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedTextField(
-            value = "",
-            onValueChange = {},
-            placeholder = { Text("장소 검색") },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(12.dp)
-                .fillMaxWidth(0.9f)
-        )
+                Box(modifier = Modifier.weight(1f)) { // 남은 공간을 모두 차지하게 함
+                    NearbyRoutesSection(
+                        viewModel = viewModel,
+                        onRouteClick = { id -> selectedRouteId = id
 
-        FloatingActionButton(
-            onClick = {
-                val map = kakaoMap ?: return@FloatingActionButton
-                if (hasLocationPermission) {
-                    getSingleFix(fusedLocationClient) { lat, lng ->
-                        moveCameraTo(map, lat, lng)
-                        updateCurrentLabel(context, map, lat, lng)
-
-                        // 🚨 [추가됨] 현재 위치 버튼을 눌렀을 때도 주변 루트를 갱신합니다.
-                        viewModel.loadNearbyRoutes(lat, lng)
-                    }
-                } else {
-                    permissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
+                            coroutineScope.launch {
+                                scaffoldState.bottomSheetState.partialExpand()
+                            }
+                            //해당 좌표로 지도 이동 로직추가
+                        }
                     )
                 }
-            },
+                Spacer(modifier = Modifier.height(100.dp)) // 하단 내비게이션 바 공간 확보
+            }
+        }
+    ) {
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.primary
-        ) { Text("현재 위치") }
+                .fillMaxSize()
+                .padding(padding) // MainScreen의 Scaffold 패딩 적용
+        ) {
+            // 카카오맵 배경
+            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-        FloatingActionButton(
-            onClick = {
-                val intent = Intent(context, RunningActivity::class.java)
-                launcher.launch(intent)
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.primary
-        ) { Text("러닝 시작") }
+            // 상단 검색바
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .padding(top = 16.dp)
+                    .align(Alignment.TopCenter),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(8.dp)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("어디서 달리고 싶으신가요?", color = Color.Gray)
+                }
+            }
+
+            // 우측 하단 플로팅 버튼들 (시트 높이만큼 bottom 여백을 주어 안 가려지게 함)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 180.dp, end = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                // 현재 위치 버튼
+                SmallFloatingActionButton(
+                    onClick = {
+                        val map = kakaoMap ?: return@SmallFloatingActionButton
+                        if (hasLocationPermission) {
+                            getSingleFix(fusedLocationClient) { lat, lng ->
+                                moveCameraTo(map, lat, lng)
+                                updateCurrentLabel(context, map, lat, lng)
+                                viewModel.loadNearbyRoutes(lat, lng)
+                            }
+                        }
+                    },
+                    containerColor = Color.White,
+                    contentColor = Color(0xFF6750A4),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.MyLocation, contentDescription = null)
+                }
+
+                // 러닝 시작 버튼
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        val intent = Intent(context, RunningActivity::class.java)
+                        launcher.launch(intent)
+                    },
+                    containerColor = Color(0xFF6750A4),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("러닝 시작", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -622,6 +687,27 @@ private fun showNicknameMarkers(kakaoMap: KakaoMap, routes: List<com.example.run
             .setTag(route.id)
 
         layer.addLabel(options)
+    }
+}
+
+@Composable
+fun RecommendedRouteCard(route: Any, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F5)),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(60.dp).background(Color.LightGray, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.DirectionsRun, contentDescription = null, tint = Color.White)
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text("인기 추천 경로", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("거리 미정 · 약 30분", fontSize = 13.sp, color = Color.Gray)
+            }
+        }
     }
 }
 
