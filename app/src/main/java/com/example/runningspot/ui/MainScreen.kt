@@ -560,7 +560,7 @@ fun RunningScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .heightIn(min = 500.dp)
+                    .heightIn(min = 400.dp)
             ) {
                 Spacer(modifier = Modifier.height(12.dp))
                 // 시트 핸들러
@@ -570,7 +570,7 @@ fun RunningScreen(
                 Text("주변 추천 루트", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color.Black)
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Box(modifier = Modifier.weight(1f)) { // 남은 공간을 모두 차지하게 함
+                Box(modifier = Modifier.weight(1f)) {
                     NearbyRoutesSection(
                         viewModel = viewModel,
                         onRouteClick = { id -> selectedRouteId = id
@@ -578,7 +578,7 @@ fun RunningScreen(
                             coroutineScope.launch {
                                 scaffoldState.bottomSheetState.partialExpand()
                             }
-                            //해당 좌표로 지도 이동 로직추가
+                            // TODO:해당 좌표로 지도 이동 로직추가
                         }
                     )
                 }
