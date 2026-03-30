@@ -114,6 +114,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
@@ -559,6 +560,7 @@ fun RunningScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .fillMaxHeight(0.8f)
                     .padding(horizontal = 20.dp)
                     .heightIn(min = 400.dp)
             ) {
@@ -574,11 +576,15 @@ fun RunningScreen(
                     NearbyRoutesSection(
                         viewModel = viewModel,
                         onRouteClick = { id -> selectedRouteId = id
-
-                            coroutineScope.launch {
-                                scaffoldState.bottomSheetState.partialExpand()
-                            }
-                            // TODO:해당 좌표로 지도 이동 로직추가
+                            val targetRoute = nearbyRoutes.find { it.id == id }
+                            targetRoute?.let { route ->
+                                coroutineScope.launch {
+                                    scaffoldState.bottomSheetState.partialExpand()
+                                    kakaoMap?.let { map ->
+                                        moveCameraTo(map, route.start_lng, route.start_lng)
+                                    }
+                                }
+                                }
                         }
                     )
                 }
