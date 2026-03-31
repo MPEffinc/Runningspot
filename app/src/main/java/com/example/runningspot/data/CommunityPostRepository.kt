@@ -172,4 +172,16 @@ class CommunityPostRepository(
         // 다운로드 URL 얻기 (이걸 Firestore에 저장)
         return ref.downloadUrl.await().toString()
     }
+    suspend fun fetchAllPosts(): List<Pair<String, CommunityPost>> {
+        val snapshot = db.collection("posts")
+            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .get()
+            .await()
+
+        return snapshot.documents.mapNotNull { doc ->
+            doc.toObject(CommunityPost::class.java)?.let { post ->
+                doc.id to post
+            }
+        }
+    }
 }

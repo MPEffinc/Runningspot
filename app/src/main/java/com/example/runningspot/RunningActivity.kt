@@ -80,6 +80,8 @@ class RunningActivity : ComponentActivity() {
     private var isPaused = false
     private var autoFollow = true
     // 상단 UI (거리/시간)
+    private lateinit var txtPace: TextView
+    private lateinit var txtCalories: TextView
     private lateinit var txtTime: TextView
     private lateinit var txtDistance: TextView
     private var startTime = 0L
@@ -109,9 +111,17 @@ class RunningActivity : ComponentActivity() {
 
         // ✅ 상단 UI (거리 & 시간)
         val infoLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 40, 40, 40)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.parseColor("#66000000"))
+                cornerRadius = 30f
+            }
+        }
+        //첫째줄에 시간, 거리 표시
+        val firstRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
-            setPadding(32, 64, 32, 0)
-            setBackgroundColor(Color.parseColor("#66000000"))
+            gravity = Gravity.CENTER
         }
         txtTime = TextView(this).apply {
             text = "⏱ 00:00"
@@ -124,14 +134,41 @@ class RunningActivity : ComponentActivity() {
             textSize = 18f
             setPadding(48, 0, 0, 0)
         }
-        infoLayout.addView(txtTime)
-        infoLayout.addView(txtDistance)
+        firstRow.addView(txtTime)
+        firstRow.addView(txtDistance)
+
+        val secondRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 0)
+        }
+
+        txtPace = TextView(this).apply {
+            text = "⚡ -'--\""
+            setTextColor(Color.WHITE)
+            textSize = 18f
+        }
+
+        txtCalories = TextView(this).apply {
+            text = "🔥 0 kcal"
+            setTextColor(Color.WHITE)
+            textSize = 18f
+            setPadding(40, 0, 0, 0)
+        }
+
+        secondRow.addView(txtPace)
+        secondRow.addView(txtCalories)
+
+        //레이아웃에 두 행 추가
+        infoLayout.addView(firstRow)
+        infoLayout.addView(secondRow)
 
         val infoParams = android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
             gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+            topMargin = 64
         }
         root.addView(infoLayout, infoParams)
 
@@ -433,14 +470,38 @@ class RunningActivity : ComponentActivity() {
                 sin(dLng / 2).pow(2.0)
         return 2 * r * asin(sqrt(sa + sb))
     }
+    fun calcPace(distanceM: Double, durationMs: Long): Double? {
+        if (distanceM < 50.0 || durationMs < 30_000L) return null // 정확도 올리기
+        val distKm = distanceM / 1000.0
+        val sec = durationMs / 1000.0
+        if (distKm <= 0.0) return null
+        return sec / distKm
+    }
+
+    // 칼로리 계산 (기본 몸무게: 70kg)
+    fun calcCalories(distanceM: Double, weightKg: Double = 70.0): Double {
+        val distKm = distanceM / 1000.0
+        return weightKg * distKm * 1.0
+    }
 
     // ✅ 상단 UI 갱신
     private fun updateUI() {
-        elapsedTime = (SystemClock.elapsedRealtime() - startTime) / 1000
+        val durationMs = SystemClock.elapsedRealtime() - startTime
+        elapsedTime = durationMs / 1000
         val minutes = elapsedTime / 60
         val seconds = elapsedTime % 60
         txtTime.text = "⏱ %02d:%02d".format(minutes, seconds)
         txtDistance.text = "📍 %.2f km".format(totalDistance / 1000.0)
+        val paceSecondsPerKm = calcPace(totalDistance, durationMs)
+        if (paceSecondsPerKm != null) {
+            val paceMin = (paceSecondsPerKm / 60).toInt()
+            val paceSec = (paceSecondsPerKm % 60).toInt()
+            txtPace.text = "⚡ %d'%02d\"".format(paceMin, paceSec)
+        } else {
+            txtPace.text = "⚡ -'--\"" // 데이터 부족
+        }
+        val calories = calcCalories(totalDistance)
+        txtCalories.text = "🔥 %.0f kcal".format(calories)
     }
 
     // ✅ 러닝 시작 (지도 로드 완료 후 실행)
