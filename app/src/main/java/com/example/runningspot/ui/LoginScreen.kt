@@ -32,6 +32,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: String) -> Unit) {
@@ -247,6 +258,49 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             api.loginWithKakaoAccount(act, callback = callback)
         }
     }
+    @Composable
+    fun LoginButtonKakao(
+        text: String,
+        enabled: Boolean,
+        onClick: () -> Unit
+    ) {
+        val kakaoYellow = Color(0xFFFEE500)
+        val kakaoText = Color(0xDE000000)
+
+        Image(
+            painter = painterResource(id = R.drawable.ic_kakao_symbol), // 👉 공식 버튼 이미지
+            contentDescription = "Kakao Login",
+            modifier = Modifier
+                .width(210.dp)
+                .height(56.dp)
+                .clickable { kakaoLogin() },
+            contentScale = ContentScale.FillBounds
+        )
+    }
+
+    @Composable
+    fun LoginButtonGoogle(
+        text: String,
+        enabled: Boolean,
+        onClick: () -> Unit
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_google_logo), // 👉 공식 버튼 이미지
+            contentDescription = "Google Login",
+            modifier = Modifier
+                .width(210.dp)        // ⭐ 원하는 크기
+                .height(56.dp)        // 공식 비율 유지
+                .clickable {
+                    val intent = googleClient?.signInIntent
+                    if (intent != null) {
+                        googleLauncher.launch(intent)
+                    } else {
+                        Toast.makeText(context, "GoogleSignIn 초기화 실패", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            contentScale = ContentScale.FillBounds
+        )
+    }
 
     // ✅ UI
     Box(
@@ -269,28 +323,28 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                 Spacer(Modifier.height(16.dp))
 
                 // ✅ Kakao 로그인 버튼
-                Button(
-                    onClick = { kakaoLogin() },
-                    colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.primary),
-                    enabled = activity != null
-                ) {
-                    Text("카카오로 로그인")
-                }
+                // ✅ Kakao 로그인 버튼
+                LoginButtonKakao(
+                    text = "카카오 로그인",
+                    enabled = activity != null,
+                    onClick = { kakaoLogin() }
+                )
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // ✅ Google 로그인 버튼
-                Button(
+// ✅ Google 로그인 버튼
+                LoginButtonGoogle(
+                    text = "Google로 로그인",
+                    enabled = googleClient != null,
                     onClick = {
                         val intent = googleClient?.signInIntent
-                        if (intent != null) googleLauncher.launch(intent)
-                        else Toast.makeText(context, "GoogleSignIn 초기화 실패", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(MaterialTheme.colorScheme.secondary),
-                    enabled = googleClient != null                               // ✅ 클라이언트 준비 체크
-                ) {
-                    Text("Google로 로그인")
-                }
+                        if (intent != null) {
+                            googleLauncher.launch(intent)
+                        } else {
+                            Toast.makeText(context, "GoogleSignIn 초기화 실패", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
             }
         }
     }
