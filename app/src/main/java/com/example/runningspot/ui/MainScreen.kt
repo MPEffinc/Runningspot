@@ -8,13 +8,17 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
+import android.widget.NumberPicker
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +31,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+  import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -65,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -122,6 +129,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -134,9 +142,11 @@ import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
-import com.android.tools.build.jetifier.core.utils.Log.e
 import com.example.runningspot.data.remote.ApiClient
 import com.example.runningspot.data.remote.NearbyRouteDto
+import com.example.runningspot.ui.theme.DialogContainer
+import com.example.runningspot.ui.theme.DialogText
+import com.example.runningspot.ui.theme.DialogTitle
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -156,6 +166,7 @@ import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kakao.vectormap.label.LabelTextBuilder
 import com.kakao.vectormap.label.LabelTextStyle
+import kotlin.math.roundToInt
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -167,6 +178,13 @@ private data class RunSummaryRef(
     val endAt: Long,
     val fileName: String // 내부 저장소에 저장된 경로 파일명
 )
+
+private enum class MyPageSubScreen {
+    Main,
+    Info,
+    ProfileEdit,
+    Settings
+}
 
 private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef, maxKeep: Int = 200) {
     val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
@@ -271,7 +289,7 @@ fun MainScreen(
     var lastDuration by rememberSaveable { mutableStateOf<Long?>(null) }
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
-    var showInfoOnMyPage by rememberSaveable { mutableStateOf(false) }
+    var myPageSubScreen by rememberSaveable { mutableStateOf(MyPageSubScreen.Main) }
 
 // 앱 시작 시 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
@@ -289,12 +307,17 @@ fun MainScreen(
         bottomBar = { BottomNavBar(selectedTab, onTabSelected = { selectedTab = it }) }
     ) { padding ->
 
+        BackHandler(enabled = selectedTab == 4 && myPageSubScreen != MyPageSubScreen.Main) {
+            myPageSubScreen = MyPageSubScreen.Main
+        }
+
         when (selectedTab) {
             0 -> {
                 if (showHistory) {
                     HistoryList(
                         padding = padding,
                         runs = runRefs,
+                        userName = userName,
                         onBack = { showHistory = false },
                         onSelect = { r ->
                             lastDistance = r.distanceM
@@ -355,7 +378,7 @@ fun MainScreen(
             )
             3 -> CommunityScreen(padding, userName)
             4 -> {
-                if (showInfoOnMyPage) {
+                if (myPageSubScreen == MyPageSubScreen.Info) {
                     Box(
                         Modifier
                             .fillMaxSize()
@@ -365,7 +388,7 @@ fun MainScreen(
                         Column(
                             Modifier.fillMaxSize()
                         ) {
-                            Button(onClick = { showInfoOnMyPage = false }) {
+                            Button(onClick = { myPageSubScreen = MyPageSubScreen.Main }) {
                                 Text("← 뒤로")
                             }
                             Spacer(Modifier.height(12.dp))
@@ -373,6 +396,18 @@ fun MainScreen(
                             InfoScreen(padding = PaddingValues(0.dp))
                         }
                     }
+                } else if (myPageSubScreen == MyPageSubScreen.ProfileEdit) {
+                    ProfileEditScreen(
+                        padding = padding,
+                        fallbackUserName = userName,
+                        fallbackProfileUrl = userProfile,
+                        onBack = { myPageSubScreen = MyPageSubScreen.Main }
+                    )
+                } else if (myPageSubScreen == MyPageSubScreen.Settings) {
+                    SettingsScreen(
+                        padding = padding,
+                        onBack = { myPageSubScreen = MyPageSubScreen.Main }
+                    )
                 } else {
                     MyPageScreen(
                         padding = padding,
@@ -380,7 +415,9 @@ fun MainScreen(
                         userProfile = userProfile,
                         provider = provider,
                         onLogout = onLogout,
-                        onShowInfo = { showInfoOnMyPage = true }
+                        onShowInfo = { myPageSubScreen = MyPageSubScreen.Info },
+                        onOpenProfileSettings = { myPageSubScreen = MyPageSubScreen.ProfileEdit },
+                        onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings }
                     )
                 }
             }
@@ -421,7 +458,6 @@ fun RunningScreen(
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
 
     val coroutineScope = rememberCoroutineScope() //
-    var selectedRouteId by remember { mutableStateOf<Long?>(null) }
 
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -433,12 +469,75 @@ fun RunningScreen(
     var isRunning by remember { mutableStateOf(false) }
     val runningPath = remember { mutableStateListOf<LatLng>() }
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
+    var selectedNearbyRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
+
+    val configuration = LocalConfiguration.current
+    val sheetPeekHeight = remember(configuration.screenHeightDp) {
+        (configuration.screenHeightDp * 0.25f).dp.coerceIn(170.dp, 260.dp)
+    }
+    val fabBottomPadding = (sheetPeekHeight * 0.6f).coerceAtLeast(96.dp)
 
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded
     )
     val scaffoldState = rememberBottomSheetScaffoldState(sheetState)
+
+    val onSelectNearbyRoute: (Long) -> Unit = { id ->
+        val targetRoute = nearbyRoutes.find { it.id == id }
+
+        coroutineScope.launch {
+            var drewRoute = false
+            runCatching {
+                val detail = ApiClient.routeApi.getRouteDetail(id)
+                kakaoMap?.let { map ->
+                    selectedNearbyRoute = drawSelectedRouteOnMap(
+                        map = map,
+                        detail = detail,
+                        previousRoute = selectedNearbyRoute
+                    )
+                    drewRoute = selectedNearbyRoute != null
+                }
+            }.onFailure {
+                val fallbackPoints = targetRoute?.points.orEmpty()
+                kakaoMap?.let { map ->
+                    selectedNearbyRoute = drawRoutePointsOnMap(
+                        map = map,
+                        points = fallbackPoints,
+                        previousRoute = selectedNearbyRoute
+                    )
+                    drewRoute = selectedNearbyRoute != null
+                }
+            }
+
+            if (!drewRoute) {
+                val fallbackPoints = targetRoute?.points.orEmpty()
+                kakaoMap?.let { map ->
+                    selectedNearbyRoute = drawRoutePointsOnMap(
+                        map = map,
+                        points = fallbackPoints,
+                        previousRoute = selectedNearbyRoute
+                    )
+                    drewRoute = selectedNearbyRoute != null
+                }
+            }
+
+            if (!drewRoute) {
+                Toast.makeText(context, "루트 경로를 불러오지 못했어요", Toast.LENGTH_SHORT).show()
+            }
+
+            scaffoldState.bottomSheetState.partialExpand()
+            kakaoMap?.let { map ->
+                if (!drewRoute) {
+                    val lat = targetRoute?.start_lat
+                    val lng = targetRoute?.start_lng
+                    if (lat != null && lng != null) {
+                        moveCameraTo(map, lat, lng)
+                    }
+                }
+            }
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -549,7 +648,7 @@ fun RunningScreen(
     //nearbyRoutes 데이터를 받아오면 지도에 마커
     LaunchedEffect(nearbyRoutes, kakaoMap) {
         if (nearbyRoutes.isNotEmpty() && kakaoMap != null) {
-            showNicknameMarkers(kakaoMap!!, nearbyRoutes)
+            showNicknameMarkers(kakaoMap!!, nearbyRoutes, onSelectNearbyRoute)
         }
     }
 
@@ -573,8 +672,9 @@ fun RunningScreen(
     }
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = 160.dp, // 하단 시트가 내려가 있을 때 보여줄 높이
-        sheetContainerColor = Color.White,
+        sheetPeekHeight = sheetPeekHeight,
+        sheetDragHandle = null,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         sheetShadowElevation = 20.dp,
         sheetContent = {
@@ -582,35 +682,48 @@ fun RunningScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.8f)
+                    .fillMaxHeight(0.92f)
                     .padding(horizontal = 20.dp)
-                    .heightIn(min = 400.dp)
+                    .navigationBarsPadding()
             ) {
-                Spacer(modifier = Modifier.height(12.dp))
-                // 시트 핸들러
-                Box(Modifier.width(40.dp).height(4.dp).background(Color(0xFFE0E0E0), CircleShape).align(Alignment.CenterHorizontally))
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        .align(Alignment.CenterHorizontally)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Text("주변 추천 루트", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color.Black)
-                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.app_logo),
+                        contentDescription = "RunningSpot logo",
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text("주변 추천 루트", fontWeight = FontWeight.ExtraBold, fontSize = 19.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text("근처 러너들의 루트를 확인해보세요", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Box(modifier = Modifier.weight(1f)) {
                     NearbyRoutesSection(
                         viewModel = viewModel,
-                        onRouteClick = { id -> selectedRouteId = id
-                            val targetRoute = nearbyRoutes.find { it.id == id }
-                            targetRoute?.let { route ->
-                                coroutineScope.launch {
-                                    scaffoldState.bottomSheetState.partialExpand()
-                                    kakaoMap?.let { map ->
-                                        moveCameraTo(map, route.start_lng, route.start_lng)
-                                    }
-                                }
-                            }
-                        }
+                        autoLoadNearbyOnStart = false,
+                        onRouteClick = onSelectNearbyRoute
                     )
                 }
-                Spacer(modifier = Modifier.height(100.dp)) // 하단 내비게이션 바 공간 확보
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     ) {
@@ -626,16 +739,17 @@ fun RunningScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth(0.92f)
-                    .padding(top = 16.dp)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp)
                     .align(Alignment.TopCenter),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+                    Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("어디서 달리고 싶으신가요?", color = Color.Gray)
+                    Text("어디서 달리고 싶으신가요?", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -643,7 +757,7 @@ fun RunningScreen(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 180.dp, end = 20.dp),
+                    .padding(bottom = fabBottomPadding, end = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.End
             ) {
@@ -659,8 +773,8 @@ fun RunningScreen(
                             }
                         }
                     },
-                    containerColor = Color.White,
-                    contentColor = Color(0xFF6750A4),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = Color(0xFF204996),
                     shape = CircleShape
                 ) {
                     Icon(Icons.Default.MyLocation, contentDescription = null)
@@ -672,8 +786,8 @@ fun RunningScreen(
                         val intent = Intent(context, RunningActivity::class.java)
                         launcher.launch(intent)
                     },
-                    containerColor = Color(0xFF6750A4),
-                    contentColor = Color.White,
+                    containerColor = Color(0xFF204996),
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = RoundedCornerShape(20.dp)
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
@@ -685,7 +799,11 @@ fun RunningScreen(
     }
 }
 
-private fun showNicknameMarkers(kakaoMap: KakaoMap, routes: List<com.example.runningspot.data.remote.NearbyRouteDto>) {
+private fun showNicknameMarkers(
+    kakaoMap: KakaoMap,
+    routes: List<com.example.runningspot.data.remote.NearbyRouteDto>,
+    onRouteClick: (Long) -> Unit
+) {
     val labelManager = kakaoMap.labelManager ?: return
     val layer = labelManager.layer ?: return
 
@@ -693,9 +811,15 @@ private fun showNicknameMarkers(kakaoMap: KakaoMap, routes: List<com.example.run
     layer.removeAll()
 
     kakaoMap.setOnLabelClickListener { _, _, label ->
-        val clickedRouteId = label.tag as? Long
+        val clickedRouteId = when (val tag = label.tag) {
+            is Long -> tag
+            is Int -> tag.toLong()
+            is Number -> tag.toLong()
+            is String -> tag.toLongOrNull()
+            else -> null
+        }
         if (clickedRouteId != null) {
-            println("클릭된 루트 ID: $clickedRouteId")
+            onRouteClick(clickedRouteId)
         }
         true
     }
@@ -703,14 +827,10 @@ private fun showNicknameMarkers(kakaoMap: KakaoMap, routes: List<com.example.run
     routes.forEach { route ->
         val pos = LatLng.from(route.start_lat, route.start_lng)
 
-        val style = LabelStyle.from(com.example.runningspot.R.drawable.ic_launcher_foreground) // 👈 본인 프로젝트의 아이콘으로 맞춰주세요
-            .setTextStyles(LabelTextStyle.from(35, android.graphics.Color.BLUE))
-
-        val nicknameText = route.nickname ?: "이름 없음"
+        val style = LabelStyle.from(com.example.runningspot.R.drawable.ic_launcher_foreground)
 
         val options = LabelOptions.from(pos)
             .setStyles(style)
-            .setTexts(LabelTextBuilder().setTexts(nicknameText))
             .setTag(route.id)
 
         layer.addLabel(options)
@@ -721,17 +841,17 @@ fun RecommendedRouteCard(route: Any, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F5)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(60.dp).background(Color.LightGray, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.DirectionsRun, contentDescription = null, tint = Color.White)
+                Icon(Icons.Default.DirectionsRun, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text("인기 추천 경로", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("거리 미정 · 약 30분", fontSize = 13.sp, color = Color.Gray)
+                Text("거리 미정 · 약 30분", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -762,12 +882,11 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
 
     layer?.removeAll()
 
-
-    val bitmap: Bitmap = try {
-        if (userMarkerImageUri.isNullOrBlank()) {
-            // 기본 리소스 사용
-            BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
-        } else {
+    val style = if (userMarkerImageUri.isNullOrBlank()) {
+        // 기본 마커는 drawable 리소스를 직접 사용해 GL bitmap 변환 경로를 단순화
+        LabelStyle.from(R.drawable.loc)
+    } else {
+        val bitmap: Bitmap = try {
             val uri = Uri.parse(userMarkerImageUri)
             // 1) 먼저 이미지 크기(메타) 확인
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -776,12 +895,12 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
             }
 
             // 2) 적절한 inSampleSize 계산 (긴 변을 maxSize로 맞춤)
-            val maxSize = 300 // 마커용 긴 변(px) — 필요시 변경
+            val maxSize = 256 // 과도한 해상도 이미지는 네이티브 렌더러 부담을 줄이기 위해 축소
             var sample = 1
             val (ow, oh) = boundsOpts.outWidth to boundsOpts.outHeight
             if (ow > 0 && oh > 0) {
-                var halfW = ow / 2
-                var halfH = oh / 2
+                val halfW = ow / 2
+                val halfH = oh / 2
                 while (halfW / sample > maxSize || halfH / sample > maxSize) {
                     sample *= 2
                 }
@@ -793,7 +912,7 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
             context.contentResolver.openInputStream(uri).use { ins ->
                 decoded = BitmapFactory.decodeStream(ins, null, opts)
             }
-            var bmp = decoded ?: BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
+            var bmp = decoded ?: BitmapFactory.decodeResource(context.resources, R.drawable.loc)
 
             // 4) EXIF 회전 보정 (안전하게)
             bmp = try {
@@ -816,19 +935,19 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
                 bmp
             }
 
-            // 5) 최종 크기 보정(정확히 마커용 사이즈로 스케일)
-            val target = 200 // 최종 마커 사이즈(px) — 필요하면 변경
+            // 5) 최종 크기 보정(너무 큰 텍스처가 올라가지 않도록 제한)
+            val target = 96
             val scaled = Bitmap.createScaledBitmap(bmp, target, target, true)
             // 6) 원형으로 잘라주기
-            getCircularBitmap(scaled)
+            getCircularBitmap(scaled).copy(Bitmap.Config.ARGB_8888, false)
+        } catch (e: Exception) {
+            Log.e("UPDATE_LABEL", "bitmap load failed", e)
+            BitmapFactory.decodeResource(context.resources, R.drawable.loc)
+                .copy(Bitmap.Config.ARGB_8888, false)
         }
-    } catch (e: Exception) {
-        Log.e("UPDATE_LABEL", "bitmap load failed", e)
-        BitmapFactory.decodeResource(context.resources, R.drawable.arrow)
+        LabelStyle.from(bitmap)
     }
 
-    // 라벨 스타일/추가 (기존 방식과 동일)
-    val style = LabelStyle.from(bitmap)
     val styles = labelManager?.addLabelStyles(LabelStyles.from(style))
     val options = LabelOptions.from(pos).setStyles(styles)
     layer?.addLabel(options)
@@ -852,6 +971,54 @@ private fun drawRunningPath(
     val newRoute = layer.addRouteLine(options)
     newRoute.show()
     onUpdate(newRoute)
+}
+
+private fun drawSelectedRouteOnMap(
+    map: KakaoMap,
+    detail: com.example.runningspot.data.remote.RouteDetailDto,
+    previousRoute: RouteLine?
+): RouteLine? {
+    val routePath = detail.points
+        .sortedBy { it.seq }
+        .map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) return null
+
+    val manager = map.routeLineManager ?: return null
+    val layer = manager.layer
+    previousRoute?.let { layer.remove(it) }
+
+    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
+    route.show()
+
+    val avgLat = routePath.map { it.latitude }.average()
+    val avgLng = routePath.map { it.longitude }.average()
+    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+
+    return route
+}
+
+private fun drawRoutePointsOnMap(
+    map: KakaoMap,
+    points: List<com.example.runningspot.data.remote.RoutePointDto>,
+    previousRoute: RouteLine?
+): RouteLine? {
+    val routePath = points
+        .sortedBy { it.seq }
+        .map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) return null
+
+    val manager = map.routeLineManager ?: return null
+    val layer = manager.layer
+    previousRoute?.let { layer.remove(it) }
+
+    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
+    route.show()
+
+    val avgLat = routePath.map { it.latitude }.average()
+    val avgLng = routePath.map { it.longitude }.average()
+    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+
+    return route
 }
 
 
@@ -917,7 +1084,7 @@ fun StatsScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.height(30.dp))
-        Text("📊 러닝 통계", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("러닝 통계", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
 
         Column(
@@ -928,14 +1095,14 @@ fun StatsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(180.dp)
-                    .background(Color(0xFFEFEFEF))
+                    .background(Color(0xFFF0F0EE))
             )
             Spacer(Modifier.height(8.dp))
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("러닝 거리")
-            Text((distance?.let { "%.2f km".format(it / 1000.0) } ?: "-"), fontWeight = FontWeight.Bold)
+            Text((distance?.let { "%.1f km".format(it / 1000.0) } ?: "-"), fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -958,7 +1125,13 @@ fun StatsScreen(
 
         Spacer(Modifier.height(30.dp))
 
-        Button(onClick = onShowHistory) { Text("기록 보기") }
+        Button(
+            onClick = onShowHistory,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF204996),
+                contentColor = Color(0xFFFAFAF8)
+            )
+        ) { Text("기록 보기") }
     }
 }
 
@@ -977,6 +1150,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
     val crewRepo = remember { CrewRepository() }
     var crews by remember { mutableStateOf<List<CrewPost>>(emptyList()) }
+    var joinedCrewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabTitles = listOf("커뮤니티", "크루")
@@ -985,12 +1159,12 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         // Firestore에서 최신 글 읽기
         val remote = repo.fetchLatestPosts(50)
 
-        // Firestore -> UI Post로 변환 (title이 Firestore에 없어서 임시로 content 앞부분을 title로 사용)
+        // Firestore -> UI Post로 변환 (title 우선, 없으면 content 일부를 fallback으로 사용)
         val remotePostsForUi: List<Post> = remote.map { (docId, p) ->
             Post(
                 id = docId.hashCode(),              // ⚠️ 임시: UI가 Int id라서 docId를 hash로 변환
                 docId = docId,
-                title = p.content.take(18),         // ⚠️ 임시 title(나중에 Firestore에 title 필드 추가 추천)
+                title = p.title.ifBlank { p.content.take(18) },
                 authorName = p.userName.ifBlank { "익명" },
                 content = p.content,
                 likes = p.likeCount.toInt(),
@@ -1004,6 +1178,9 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         // “기존 로컬글 + Firestore글” 합치기
         posts = remotePostsForUi
         crews = crewRepo.fetchCrews()
+        joinedCrewIds = crews.mapNotNull { crew ->
+            if (crewRepo.isMember(crew.id)) crew.id else null
+        }.toSet()
     }
 
     // 돌아올 때 새로고침
@@ -1028,13 +1205,13 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             // 탭
             TabRow(
                 selectedTabIndex = selectedTab,
-                containerColor = Color(0xFFF7F4FF),
+                containerColor = MaterialTheme.colorScheme.surface,
                 indicator = { tabPos ->
                     TabRowDefaults.Indicator(
                         modifier = Modifier
                             .tabIndicatorOffset(tabPos[selectedTab])
                             .height(3.dp),
-                        color = Color(0xFF6C4CD3)
+                        color = Color(0xFF204996)
                     )
                 }
             ) {
@@ -1046,7 +1223,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                             Text(
                                 text = title,
                                 fontWeight = if (selectedTab == i) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedTab == i) Color(0xFF6C4CD3) else Color.Gray
+                                color = if (selectedTab == i) Color(0xFF204996) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
@@ -1073,6 +1250,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
                         CrewPostCard(
                             crew = crew,
+                            isJoined = joinedCrewIds.contains(crew.id),
+                            onEnterChat = { openChat(crew.id) },
                             onClick = {
                                 scope.launch {
                                     val ok = crewRepo.isMember(crew.id)
@@ -1084,6 +1263,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     try {
                                         crewRepo.joinCrew(crew.id)
                                         crews = crewRepo.fetchCrews()
+                                        joinedCrewIds = joinedCrewIds + crew.id
                                         openChat(crew.id)
 
                                     } catch (e: Exception) {
@@ -1133,7 +1313,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                 },
                             shape = RoundedCornerShape(18.dp),
                             elevation = CardDefaults.cardElevation(4.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF7F4FF))
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAF8))
                         ) {
 
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -1169,7 +1349,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                 Text(
                                     text = post.authorName,
                                     fontSize = 13.sp,
-                                    color = Color(0xFF222222),
+                                    color = Color(0xFF1A1A1A),
                                     fontWeight = FontWeight.Medium
                                 )
 
@@ -1180,7 +1360,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     post.title,
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF3C2A7D)
+                                    color = Color(0xFF204996)
                                 )
 
                                 Spacer(Modifier.height(6.dp))
@@ -1202,12 +1382,12 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFFEDE7F6))
+                                            .background(Color(0x33F1B243))
                                             .padding(horizontal = 20.dp, vertical = 12.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            "거리 ${"%.2f".format(post.distanceKm)}km",
+                                            "거리 ${"%.1f".format(post.distanceKm)}km",
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
@@ -1233,7 +1413,33 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                         Icon(
                                             imageVector = Icons.Filled.Favorite,
                                             contentDescription = null,
-                                            tint = Color(0xFFE57373)
+                                            tint = Color(0xFFE57373),
+                                            modifier = Modifier.clickable {
+                                                val safeDocId = post.docId ?: return@clickable
+                                                // UI 먼저 반영해서 피드에서 즉시 체감되게 처리
+                                                posts = posts.map {
+                                                    if (it.docId == safeDocId) it.copy(likes = (it.likes + 1).coerceAtLeast(0)) else it
+                                                }
+                                                scope.launch {
+                                                    runCatching {
+                                                        repo.toggleLike(safeDocId)
+                                                        val latest = repo.fetchPost(safeDocId)
+                                                        val latestLike = latest?.likeCount?.toInt() ?: post.likes
+                                                        posts = posts.map {
+                                                            if (it.docId == safeDocId) it.copy(likes = latestLike) else it
+                                                        }
+                                                    }.onFailure {
+                                                        // 실패 시 현재 피드 재동기화
+                                                        runCatching {
+                                                            val latest = repo.fetchPost(safeDocId)
+                                                            val latestLike = latest?.likeCount?.toInt() ?: post.likes
+                                                            posts = posts.map {
+                                                                if (it.docId == safeDocId) it.copy(likes = latestLike) else it
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         )
                                         Text("${post.likes}", fontSize = 15.sp)
                                     }
@@ -1264,19 +1470,22 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 // FAB
         FloatingActionButton(
             onClick = { showWritePicker = true },
-            containerColor = Color(0xFF6C4CD3),
+            containerColor = Color(0xFF204996),
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(20.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "추가", tint = Color.White)
+            Icon(Icons.Default.Add, contentDescription = "추가", tint = Color(0xFFFAFAF8))
         }
 
 // ✅ 선택 다이얼로그
         if (showWritePicker) {
             AlertDialog(
                 onDismissRequest = { showWritePicker = false },
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
                 title = { Text("무엇을 작성할까요?") },
                 text = {
                     Column {
@@ -1319,18 +1528,25 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 @Composable
 fun CrewPostCard(
     crew: CrewPost,
+    isJoined: Boolean,
+    onEnterChat: () -> Unit,
     onClick: () -> Unit,
     onJoin: () -> Unit
 ) {
+    val isClosed = crew.currentMembers >= crew.maxMembers
+    val cardColor = if (!isJoined && isClosed) Color(0xFFF0F0EE) else Color(0xFFFAFAF8)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(crew.title, fontWeight = FontWeight.Bold)
-            Text(crew.location, color = Color.Gray)
+            Text(crew.title, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
+            Text(crew.location, color = Color(0xFF2A2A2A))
 
             Spacer(Modifier.height(8.dp))
 
@@ -1339,11 +1555,24 @@ fun CrewPostCard(
             Spacer(Modifier.height(8.dp))
 
             Button(
-                onClick = onJoin,
-                enabled = crew.currentMembers < crew.maxMembers
+                onClick = {
+                    when {
+                        isJoined -> onEnterChat()
+                        !isClosed -> onJoin()
+                    }
+                },
+                enabled = isJoined || !isClosed,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isJoined) Color(0xFFF1B243) else Color(0xFF204996),
+                    contentColor = if (isJoined) Color(0xFF1A1A1A) else Color(0xFFFAFAF8),
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFFF0F0EE)
+                )
             ) {
                 Text(
-                    if (crew.currentMembers >= crew.maxMembers)
+                    if (isJoined)
+                        "채팅 참여"
+                    else if (isClosed)
                         "모집 마감"
                     else
                         "참여하기"
@@ -1426,22 +1655,14 @@ fun MyPageScreen(
     userProfile: String?,
     provider: String?,
     onLogout: () -> Unit,
-    onShowInfo: () -> Unit
-) {
+    onShowInfo: () -> Unit,
+    onOpenProfileSettings: () -> Unit,
+    onOpenAppSettings: () -> Unit
+ ) {
     val context = LocalContext.current
 
     val db = remember { FirebaseFirestore.getInstance() }
-    val storage = remember { FirebaseStorage.getInstance() }
-    val scope = rememberCoroutineScope()
     val auth = remember { FirebaseAuth.getInstance() }
-    var heightCm by remember { mutableStateOf<Double?>(null) }
-    var weightKg by remember { mutableStateOf<Double?>(null) }
-
-    var showBodyInfoDialog by remember { mutableStateOf(false) }
-    var heightInput by remember { mutableStateOf("") }
-    var weightInput by remember { mutableStateOf("") }
-
-    var loading by remember { mutableStateOf(false) }
     var nicknameFromDb by remember { mutableStateOf<String?>(null) }
     var uid by remember { mutableStateOf(auth.currentUser?.uid) }
     // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
@@ -1496,7 +1717,8 @@ fun MyPageScreen(
 
                 MyPagePostItem(
                     id = doc.id,
-                    title = (doc.getString("content") ?: "").take(18),
+                    title = doc.getString("title")?.takeIf { it.isNotBlank() }
+                        ?: (doc.getString("content") ?: "").take(18),
                     authorName = doc.getString("userName") ?: displayName,
                     content = doc.getString("content") ?: "",
                     imageUrl = imageUrls?.firstOrNull() as? String,
@@ -1516,55 +1738,6 @@ fun MyPageScreen(
             postsLoading = false
         }
     }
-
-    // ✅ 갤러리에서 사진 선택 → 업로드 → users/{uid}.profileUrl 갱신
-    val pickImage = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val currentUid = uid
-        if (currentUid == null) {
-            Toast.makeText(context, "로그인이 필요합니다", Toast.LENGTH_SHORT).show()
-            return@rememberLauncherForActivityResult
-        }
-
-        scope.launch {
-            try {
-                loading = true
-
-                // 1) Storage 업로드
-                val ref = storage.reference
-                    .child("profileImages/$currentUid/profile_${System.currentTimeMillis()}.jpg")
-
-                ref.putFile(uri).await()
-
-                // 2) 다운로드 URL
-                val downloadUrl = ref.downloadUrl.await().toString()
-
-                // 3) Firestore users 업데이트
-                db.collection("users").document(currentUid)
-                    .set(
-                        mapOf(
-                            "profileUrl" to downloadUrl,
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        ),
-                        SetOptions.merge()
-                    )
-                    .await()
-
-                // 4) 화면 즉시 반영
-                profileUrlFromDb = downloadUrl
-
-                Toast.makeText(context, "프로필 사진이 변경됐어요", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Log.e("PROFILE_DEBUG", "프로필 사진 업로드 실패", e)
-                Toast.makeText(context, "변경 실패: ${e.message}", Toast.LENGTH_LONG).show()
-            } finally {
-                loading = false
-            }
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1633,7 +1806,7 @@ fun MyPageScreen(
 
                 Text(
                     text = provider?.uppercase() ?: "",
-                    color = Color.Gray,
+                    color = Color(0xFF2A2A2A),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -1664,7 +1837,7 @@ fun MyPageScreen(
                         .padding(top = 30.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("작성한 게시글이 없어요", color = Color.Gray)
+                    Text("작성한 게시글이 없어요", color = Color(0xFF2A2A2A))
                 }
             } else {
                 LazyVerticalStaggeredGrid(
@@ -1709,7 +1882,7 @@ fun MyPageScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.28f))
+                    .background(Color(0xFF1A1A1A).copy(alpha = 0.28f))
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }
@@ -1726,14 +1899,14 @@ fun MyPageScreen(
                         ) { },
                     shape = RoundedCornerShape(24.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF111111))
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp)
                     ) {
                         Text(
                             text = "더 보기",
-                            color = Color.White,
+                            color = Color(0xFFFAFAF8),
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1752,7 +1925,7 @@ fun MyPageScreen(
                                         Icon(
                                             imageVector = Icons.Default.Info,
                                             contentDescription = "앱 정보",
-                                            tint = Color.White
+                                            tint = Color(0xFFFAFAF8)
                                         )
                                     },
                                     title = "앱 정보",
@@ -1767,21 +1940,21 @@ fun MyPageScreen(
                                         Icon(
                                             imageVector = Icons.Default.Person,
                                             contentDescription = "프로필 변경",
-                                            tint = Color.White
+                                            tint = Color(0xFFFAFAF8)
                                         )
                                     },
-                                    title = if (loading) "업로드 중" else "프로필 변경",
+                                    title = "프로필 변경",
                                     onClick = {
                                         showMenu = false
-                                        if (!loading) pickImage.launch("image/*")
-                                    }
+                                        onOpenProfileSettings()
+                                     }
                                 )
                                 MenuPopupButton(
                                     icon = {
                                         Icon(
                                             imageVector = Icons.Default.Logout,
                                             contentDescription = "로그아웃",
-                                            tint = Color.White
+                                            tint = Color(0xFFFAFAF8)
                                         )
                                     },
                                     title = "로그아웃",
@@ -1794,18 +1967,16 @@ fun MyPageScreen(
                                 MenuPopupButton(
                                     icon = {
                                         Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "신체정보 수정",
-                                            tint = Color.White
+                                            imageVector = Icons.Default.Settings,
+                                            contentDescription = "환경설정",
+                                            tint = Color(0xFFFAFAF8)
                                         )
                                     },
-                                    title = "신체정보",
+                                    title = "환경설정",
                                     onClick = {
-                                            showMenu = false
-                                            heightInput = heightCm?.toString() ?: ""
-                                            weightInput = weightKg?.toString() ?: ""
-                                            showBodyInfoDialog = true
-                                    }
+                                        showMenu = false
+                                        onOpenAppSettings()
+                                     }
                                 )
                             }
 
@@ -1816,6 +1987,579 @@ fun MyPageScreen(
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProfileEditScreen(
+    padding: PaddingValues,
+    fallbackUserName: String?,
+    fallbackProfileUrl: String?,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val storage = remember { FirebaseStorage.getInstance() }
+    val uid = auth.currentUser?.uid
+
+    var profileUrl by remember { mutableStateOf(fallbackProfileUrl) }
+    var nickname by remember { mutableStateOf(fallbackUserName.orEmpty()) }
+    val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+    var birthYear by remember { mutableStateOf(currentYear - 20) }
+    var birthMonth by remember { mutableStateOf(1) }
+    var birthDay by remember { mutableStateOf(1) }
+    var heightCm by remember { mutableStateOf(170) }
+    var weightInt by remember { mutableStateOf(65) }
+    var weightDec by remember { mutableStateOf(0) }
+    var goalInt by remember { mutableStateOf(3) }
+    var goalDec by remember { mutableStateOf(0) }
+    var gender by remember { mutableStateOf("미설정") }
+    var saving by remember { mutableStateOf(false) }
+    var showBirthYearPicker by remember { mutableStateOf(false) }
+    var showHeightPicker by remember { mutableStateOf(false) }
+    var showWeightPicker by remember { mutableStateOf(false) }
+    var showDailyGoalPicker by remember { mutableStateOf(false) }
+
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null || uid == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val ref = storage.reference.child("profileImages/$uid/profile_${System.currentTimeMillis()}.jpg")
+                ref.putFile(uri).await()
+                profileUrl = ref.downloadUrl.await().toString()
+            }.onFailure {
+                Toast.makeText(context, "프로필 이미지 업로드 실패", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(uid) {
+        if (uid == null) return@LaunchedEffect
+        runCatching {
+            val doc = db.collection("users").document(uid).get().await()
+            nickname = doc.getString("nickname") ?: nickname
+            profileUrl = doc.getString("profileUrl") ?: profileUrl
+            val birthDateText = doc.getString("birthDate")
+            val birthParts = birthDateText?.split("-")
+            birthYear = birthParts?.getOrNull(0)?.toIntOrNull()
+                ?: doc.getLong("birthYear")?.toInt()
+                ?: birthYear
+            birthMonth = birthParts?.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 12) ?: birthMonth
+            val maxDay = daysInMonth(birthYear, birthMonth)
+            birthDay = (birthParts?.getOrNull(2)?.toIntOrNull() ?: birthDay).coerceIn(1, maxDay)
+
+            heightCm = (doc.getDouble("heightCm") ?: heightCm.toDouble()).toInt().coerceIn(120, 220)
+
+            val weightValue = (doc.getDouble("weightKg") ?: (weightInt + weightDec / 10.0)).coerceIn(30.0, 150.0)
+            weightInt = weightValue.toInt()
+            weightDec = ((weightValue * 10).roundToInt() % 10).coerceIn(0, 9)
+
+            val goalValue = (doc.getDouble("dailyGoalKm") ?: (goalInt + goalDec / 10.0)).coerceIn(0.0, 30.0)
+            goalInt = goalValue.toInt()
+            goalDec = ((goalValue * 10).roundToInt() % 10).coerceIn(0, 9)
+            gender = doc.getString("gender") ?: "미설정"
+        }
+    }
+
+    BackHandler(onBack = onBack)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("프로필 변경") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("뒤로") }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(innerPadding)
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (!profileUrl.isNullOrBlank()) {
+                Image(
+                    painter = rememberAsyncImagePainter(profileUrl),
+                    contentDescription = "프로필",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .clickable { pickImage.launch("image/*") }
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF0F0EE))
+                        .clickable { pickImage.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("사진 변경")
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            OutlinedTextField(value = nickname, onValueChange = { nickname = it }, label = { Text("이름") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            ProfilePickerField(
+                label = "생년월일",
+                valueText = "%04d-%02d-%02d".format(birthYear, birthMonth, birthDay),
+                onClick = { showBirthYearPicker = true }
+            )
+            Spacer(Modifier.height(10.dp))
+            ProfilePickerField(
+                label = "키",
+                valueText = "${heightCm}cm",
+                onClick = { showHeightPicker = true }
+            )
+            Spacer(Modifier.height(10.dp))
+            ProfilePickerField(
+                label = "몸무게",
+                valueText = "${weightInt}.${weightDec}kg",
+                onClick = { showWeightPicker = true }
+            )
+            Spacer(Modifier.height(10.dp))
+            ProfilePickerField(
+                label = "일일 러닝 목표",
+                valueText = "${goalInt}.${goalDec}km",
+                onClick = { showDailyGoalPicker = true }
+            )
+            Spacer(Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("남성", "여성", "기타").forEach { item ->
+                    FilterChip(
+                        selected = gender == item,
+                        onClick = { gender = item },
+                        label = { Text(item) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Button(
+                onClick = {
+                    if (uid == null || saving) return@Button
+                    saving = true
+                    scope.launch {
+                        runCatching {
+                            val data = mutableMapOf<String, Any>(
+                                "nickname" to nickname.trim(),
+                                "birthDate" to "%04d-%02d-%02d".format(birthYear, birthMonth, birthDay),
+                                "birthYear" to birthYear,
+                                "gender" to gender,
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                            profileUrl?.takeIf { it.isNotBlank() }?.let { data["profileUrl"] = it }
+                            data["heightCm"] = heightCm.toDouble()
+                            data["weightKg"] = (weightInt + (weightDec / 10.0))
+                            data["dailyGoalKm"] = String.format(
+                                java.util.Locale.getDefault(),
+                                "%.1f",
+                                goalInt + (goalDec / 10.0)
+                            ).toDouble()
+                            db.collection("users").document(uid).set(data, SetOptions.merge()).await()
+                        }.onSuccess {
+                            Toast.makeText(context, "프로필 저장 완료", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }.onFailure {
+                            Toast.makeText(context, "저장 실패", Toast.LENGTH_SHORT).show()
+                        }
+                        saving = false
+                    }
+                },
+                enabled = !saving,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (saving) "저장 중..." else "저장")
+            }
+        }
+
+        DateWheelDialog(
+            show = showBirthYearPicker,
+            title = "생년월일 선택",
+            year = birthYear,
+            month = birthMonth,
+            day = birthDay,
+            currentYear = currentYear,
+            onDismiss = { showBirthYearPicker = false },
+            onConfirm = { y, m, d ->
+                birthYear = y
+                birthMonth = m
+                birthDay = d
+                showBirthYearPicker = false
+            }
+        )
+
+        NumberWheelDialog(
+            show = showHeightPicker,
+            title = "키 선택",
+            min = 120,
+            max = 220,
+            initial = heightCm,
+            formatValue = { "${it}cm" },
+            onDismiss = { showHeightPicker = false },
+            onConfirm = {
+                heightCm = it
+                showHeightPicker = false
+            }
+        )
+
+        DecimalWheelDialog(
+            show = showWeightPicker,
+            title = "몸무게 선택",
+            intMin = 30,
+            intMax = 150,
+            initialInt = weightInt,
+            initialDec = weightDec,
+            unit = "kg",
+            onDismiss = { showWeightPicker = false },
+            onConfirm = { i, d ->
+                weightInt = i
+                weightDec = d
+                showWeightPicker = false
+            }
+        )
+
+        DecimalWheelDialog(
+            show = showDailyGoalPicker,
+            title = "일일 러닝 목표 선택",
+            intMin = 0,
+            intMax = 30,
+            initialInt = goalInt,
+            initialDec = goalDec,
+            unit = "km",
+            onDismiss = { showDailyGoalPicker = false },
+            onConfirm = { i, d ->
+                goalInt = i
+                goalDec = d
+                showDailyGoalPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProfilePickerField(
+    label: String,
+    valueText: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, color = Color(0xFF2A2A2A))
+            Text(valueText, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun NumberWheelDialog(
+    show: Boolean,
+    title: String,
+    min: Int,
+    max: Int,
+    initial: Int,
+    formatValue: (Int) -> String,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    if (!show) return
+
+    var selected by remember(show, min, max, initial) {
+        mutableStateOf(initial.coerceIn(min, max))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DialogContainer,
+        titleContentColor = DialogTitle,
+        textContentColor = DialogText,
+        title = { Text(title) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                AndroidView(
+                    factory = { ctx ->
+                        NumberPicker(ctx).apply {
+                            minValue = min
+                            maxValue = max
+                            value = selected
+                            wrapSelectorWheel = false
+                            descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                            setOnValueChangedListener { _, _, newVal ->
+                                selected = newVal
+                            }
+                            post {
+                                for (i in 0 until childCount) {
+                                    val tv = getChildAt(i) as? android.widget.TextView ?: continue
+                                    tv.gravity = android.view.Gravity.CENTER
+                                    tv.textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                                }
+                            }
+                        }
+                    },
+                    update = { picker ->
+                        picker.minValue = min
+                        picker.maxValue = max
+                        if (picker.value != selected) picker.value = selected
+                        picker.post {
+                            for (i in 0 until picker.childCount) {
+                                val tv = picker.getChildAt(i) as? android.widget.TextView ?: continue
+                                tv.gravity = android.view.Gravity.CENTER
+                                tv.textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                            }
+                        }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(formatValue(selected), fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selected) }) { Text("확인") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+private fun daysInMonth(year: Int, month: Int): Int {
+    return when (month) {
+        1, 3, 5, 7, 8, 10, 12 -> 31
+        4, 6, 9, 11 -> 30
+        2 -> {
+            val leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+            if (leap) 29 else 28
+        }
+        else -> 30
+    }
+}
+
+@Composable
+private fun DateWheelDialog(
+    show: Boolean,
+    title: String,
+    year: Int,
+    month: Int,
+    day: Int,
+    currentYear: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int, Int) -> Unit
+) {
+    if (!show) return
+
+    var selectedYear by remember(show, year) { mutableStateOf(year.coerceIn(1900, currentYear)) }
+    var selectedMonth by remember(show, month) { mutableStateOf(month.coerceIn(1, 12)) }
+    var selectedDay by remember(show, day) { mutableStateOf(day.coerceIn(1, 31)) }
+
+    val maxDay = daysInMonth(selectedYear, selectedMonth)
+    if (selectedDay > maxDay) selectedDay = maxDay
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DialogContainer,
+        titleContentColor = DialogTitle,
+        textContentColor = DialogText,
+        title = { Text(title) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NumberWheel(
+                        min = 1900,
+                        max = currentYear,
+                        initial = selectedYear,
+                        onChanged = { selectedYear = it },
+                        modifier = Modifier.width(110.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    NumberWheel(
+                        min = 1,
+                        max = 12,
+                        initial = selectedMonth,
+                        onChanged = { selectedMonth = it },
+                        modifier = Modifier.width(90.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    NumberWheel(
+                        min = 1,
+                        max = maxDay,
+                        initial = selectedDay.coerceIn(1, maxDay),
+                        onChanged = { selectedDay = it },
+                        modifier = Modifier.width(90.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("%04d-%02d-%02d".format(selectedYear, selectedMonth, selectedDay), fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selectedYear, selectedMonth, selectedDay) }) { Text("확인") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun DecimalWheelDialog(
+    show: Boolean,
+    title: String,
+    intMin: Int,
+    intMax: Int,
+    initialInt: Int,
+    initialDec: Int,
+    unit: String,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit
+) {
+    if (!show) return
+
+    var selectedInt by remember(show, initialInt) { mutableStateOf(initialInt.coerceIn(intMin, intMax)) }
+    var selectedDec by remember(show, initialDec) { mutableStateOf(initialDec.coerceIn(0, 9)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DialogContainer,
+        titleContentColor = DialogTitle,
+        textContentColor = DialogText,
+        title = { Text(title) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NumberWheel(
+                        min = intMin,
+                        max = intMax,
+                        initial = selectedInt,
+                        onChanged = { selectedInt = it },
+                        modifier = Modifier.width(110.dp)
+                    )
+                    Text(".", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp))
+                    NumberWheel(
+                        min = 0,
+                        max = 9,
+                        initial = selectedDec,
+                        onChanged = { selectedDec = it },
+                        modifier = Modifier.width(90.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("${selectedInt}.${selectedDec}${unit}", fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selectedInt, selectedDec) }) { Text("확인") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun NumberWheel(
+    min: Int,
+    max: Int,
+    initial: Int,
+    onChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            NumberPicker(ctx).apply {
+                minValue = min
+                maxValue = max
+                value = initial.coerceIn(min, max)
+                wrapSelectorWheel = false
+                descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                setOnValueChangedListener { _, _, newVal -> onChanged(newVal) }
+                post {
+                    for (i in 0 until childCount) {
+                        val tv = getChildAt(i) as? android.widget.TextView ?: continue
+                        tv.gravity = android.view.Gravity.CENTER
+                        tv.textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                    }
+                }
+            }
+        },
+        update = { picker ->
+            picker.minValue = min
+            picker.maxValue = max
+            val clamped = initial.coerceIn(min, max)
+            if (picker.value != clamped) picker.value = clamped
+            picker.post {
+                for (i in 0 until picker.childCount) {
+                    val tv = picker.getChildAt(i) as? android.widget.TextView ?: continue
+                    tv.gravity = android.view.Gravity.CENTER
+                    tv.textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                }
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(
+    padding: PaddingValues,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("환경설정") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("뒤로") }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(innerPadding)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("환경설정 화면입니다.")
+            Text("추후 옵션을 추가할 수 있도록 분리해두었습니다.", color = Color(0xFF2A2A2A))
+        }
+    }
+}
+
 @Composable
 fun MenuPopupButton(
     icon: @Composable () -> Unit,
@@ -1842,7 +2586,7 @@ fun MenuPopupButton(
 
         Text(
             text = title,
-            color = Color.White,
+            color = Color(0xFFFAFAF8),
             fontSize = 12.sp,
             maxLines = 1
         )
@@ -1859,7 +2603,7 @@ fun MyPinterestPostCard(
             .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAF8))
     ) {
         Column(
             modifier = Modifier.fillMaxWidth()
@@ -1888,10 +2632,10 @@ fun MyPinterestPostCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
-                        .background(Color(0xFFF0F0F0)),
+                        .background(Color(0xFFF0F0EE)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No Image", color = Color.Gray)
+                    Text("No Image", color = Color(0xFF2A2A2A))
                 }
             }
 
@@ -2136,6 +2880,7 @@ fun calcCalories(distanceM: Double, weightKg: Double = 70.0): Double {
 private fun HistoryList(
     padding: PaddingValues,
     runs: List<RunSummaryRef>,
+    userName: String?,
     onBack: () -> Unit = {},
     onSelect: (RunSummaryRef) -> Unit = {},
     onDelete: (RunSummaryRef) -> Unit = {}
@@ -2148,9 +2893,12 @@ private fun HistoryList(
     var uploadTarget by remember { mutableStateOf<RunSummaryRef?>(null) }
     var uploadTitle by remember { mutableStateOf("") }
     var uploadVisibility by remember { mutableStateOf("PUBLIC") }
+    var pendingDelete by remember { mutableStateOf<RunSummaryRef?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
 
     val createResult by viewModel.createResult.collectAsState()
     val error by viewModel.error.collectAsState()
+    val historyCardColor = Color(0xFFF0F0EE)
 
     LaunchedEffect(createResult) {
         if (createResult != null) {
@@ -2175,7 +2923,13 @@ private fun HistoryList(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(onClick = onBack) { Text("← 뒤로") }
+            Button(
+                onClick = onBack,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF204996),
+                    contentColor = Color(0xFFFAFAF8)
+                )
+            ) { Text("← 뒤로") }
             Text("러닝 기록", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Spacer(Modifier.width(1.dp))
         }
@@ -2190,6 +2944,7 @@ private fun HistoryList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = historyCardColor),
                 elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column(
@@ -2226,6 +2981,7 @@ private fun HistoryList(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(r) },
+                        colors = CardDefaults.cardColors(containerColor = historyCardColor),
                         elevation = CardDefaults.cardElevation(2.dp)
                     ) {
                         Box(
@@ -2243,7 +2999,7 @@ private fun HistoryList(
 
                                 Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.height(4.dp))
-                                Text("거리 ${"%.2f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
+                                Text("거리 ${"%.1f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
                             }
                             Row(
                                 modifier = Modifier.align(Alignment.BottomEnd),
@@ -2255,7 +3011,7 @@ private fun HistoryList(
                                     modifier = Modifier.clickable {
                                         // 업로드 대상 선택 + 다이얼로그 열기
                                         uploadTarget = r
-                                        uploadTitle = r.titleOrDefault()
+                                        uploadTitle = r.titleOrDefault(userName)
                                         uploadVisibility = "PUBLIC"
                                         showUploadDialog = true
                                     }
@@ -2263,7 +3019,7 @@ private fun HistoryList(
                                 Text(
                                     text = "삭제",
                                     color = Color.Red,
-                                    modifier = Modifier.clickable { onDelete(r) }
+                                    modifier = Modifier.clickable { pendingDelete = r }
                                 )
                             }
 
@@ -2276,6 +3032,9 @@ private fun HistoryList(
     if (showUploadDialog && uploadTarget != null) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showUploadDialog = false },
+            containerColor = DialogContainer,
+            titleContentColor = DialogTitle,
+            textContentColor = DialogText,
             title = { Text("루트 업로드") },
             text = {
                 Column {
@@ -2303,6 +3062,7 @@ private fun HistoryList(
             },
             confirmButton = {
                 Button(onClick = {
+                    if (isUploading) return@Button
                     val target = uploadTarget ?: return@Button
 
                     // 1) 로컬 파일에서 경로 읽기
@@ -2326,7 +3086,7 @@ private fun HistoryList(
 
                     // 3) CreateRouteRequest 구성
                     val body = com.example.runningspot.data.remote.CreateRouteRequest(
-                        title = uploadTitle.ifBlank { target.titleOrDefault() },
+                        title = uploadTitle.ifBlank { target.titleOrDefault(userName) },
                         distance_m = target.distanceM,
                         start_lat = start.first,
                         start_lng = start.second,
@@ -2337,17 +3097,63 @@ private fun HistoryList(
                     )
 
                     // 4) 서버 업로드 호출
+                    isUploading = true
                     viewModel.createRoute(body)
-                }) { Text("업로드") }
+                }, enabled = !isUploading) { Text(if (isUploading) "업로드 중..." else "업로드") }
             },
             dismissButton = {
                 Button(onClick = { showUploadDialog = false }) { Text("취소") }
             }
         )
     }
+
+    LaunchedEffect(createResult, error) {
+        if (createResult != null || error != null) {
+            isUploading = false
+        }
+    }
+
+    if (pendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            containerColor = DialogContainer,
+            titleContentColor = DialogTitle,
+            textContentColor = DialogText,
+            title = { Text("삭제 확인") },
+            text = { Text("삭제하시겠습니까?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = pendingDelete ?: return@TextButton
+                    pendingDelete = null
+                    onDelete(target)
+                }) { Text("삭제") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("취소") }
+            }
+        )
+    }
+
+    if (isUploading) {
+        AlertDialog(
+            onDismissRequest = {},
+            containerColor = DialogContainer,
+            titleContentColor = DialogTitle,
+            textContentColor = DialogText,
+            confirmButton = {},
+            title = { Text("처리 중") },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    Text("루트를 업로드하고 있어요")
+                }
+            }
+        )
+    }
 }
-private fun RunSummaryRef.titleOrDefault(): String {
-    return "내 러닝 루트 ${formatDate(endAt)}"
+private fun RunSummaryRef.titleOrDefault(userName: String?): String {
+    val safeName = userName?.takeIf { it.isNotBlank() } ?: "사용자"
+    return "${safeName}의 러닝 루트 ${formatDate(endAt)}"
 }
 
 private fun formatDate(ms: Long): String {
@@ -2358,19 +3164,19 @@ private fun formatDate(ms: Long): String {
 @Composable
 private fun WeeklyStatsScreen(
     padding: PaddingValues,
-    runs: List<RunSummaryRef>,
-    viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    runs: List<RunSummaryRef>
 ) {
-    var selectedRouteId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = auth.currentUser?.uid
+    var dailyGoalKm by remember { mutableStateOf(0.0) }
 
-    // 상세 화면으로 전환
-    if (selectedRouteId != null) {
-        RouteDetailScreen(
-            padding = padding,
-            routeId = selectedRouteId!!,
-            onBack = { selectedRouteId = null }
-        )
-        return
+    LaunchedEffect(uid) {
+        if (uid == null) return@LaunchedEffect
+        runCatching {
+            val doc = db.collection("users").document(uid).get().await()
+            dailyGoalKm = doc.getDouble("dailyGoalKm") ?: 0.0
+        }
     }
 
     val now = System.currentTimeMillis()
@@ -2429,14 +3235,25 @@ private fun WeeklyStatsScreen(
     }
 
     val maxValueKm = days.maxOfOrNull { it.valueKm } ?: 0.0
+    val chartMaxKm = maxOf(maxValueKm, dailyGoalKm)
+
+    val totalDistanceAllM = runs.sumOf { it.distanceM }
+    val totalKm = totalDistanceAllM / 1000.0
+    val totalDurationMs = runs.sumOf { it.durationMs }
+    val totalKcal = runs.sumOf { calcCalories(it.distanceM) }
+    val totalRuns = runs.size
+    val avgPaceText = calcPace(totalDistanceAllM, totalDurationMs)?.let { formatPace(it) } ?: "-"
+    val todayDistanceKm = days.lastOrNull()?.valueKm ?: 0.0
+    val achievedTodayGoal = dailyGoalKm > 0.0 && todayDistanceKm >= dailyGoalKm
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
-        Text("📈 최근 1주일 러닝 기록", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("최근 1주일 러닝 기록", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
 
         if (maxValueKm <= 0.0) {
@@ -2460,7 +3277,7 @@ private fun WeeklyStatsScreen(
                     .height(220.dp)
             ) {
                 val barCount = days.size
-                val maxVal = maxValueKm.toFloat()
+                val maxVal = chartMaxKm.toFloat().coerceAtLeast(0.1f)
 
                 val barWidth = size.width / (barCount * 1.7f)
                 val barSpace = barWidth * 0.8f
@@ -2477,8 +3294,14 @@ private fun WeeklyStatsScreen(
                             index * (barWidth + barSpace)
                     val top = size.height - barHeight
 
+                    val barColor = if (dailyGoalKm > 0.0 && day.valueKm < dailyGoalKm) {
+                        Color(0xFFE98B72)
+                    } else {
+                        Color(0xFF8BCF74)
+                    }
+
                     drawRect(
-                        color = Color(0xFF4CAF50),
+                        color = barColor,
                         topLeft = androidx.compose.ui.geometry.Offset(
                             xCenter - barWidth / 2f,
                             top
@@ -2487,6 +3310,17 @@ private fun WeeklyStatsScreen(
                             barWidth,
                             barHeight
                         )
+                    )
+                }
+
+                if (dailyGoalKm > 0.0) {
+                    val goalRatio = (dailyGoalKm.toFloat() / maxVal).coerceIn(0f, 1f)
+                    val goalY = size.height - (chartHeight * goalRatio)
+                    drawLine(
+                        color = Color(0xFFB455C6),
+                        start = androidx.compose.ui.geometry.Offset(0f, goalY),
+                        end = androidx.compose.ui.geometry.Offset(size.width, goalY),
+                        strokeWidth = 4f
                     )
                 }
             }
@@ -2506,17 +3340,17 @@ private fun WeeklyStatsScreen(
                             Text(
                                 "%.1f km".format(day.valueKm),
                                 fontSize = 10.sp,
-                                color = Color.Black
+                                color = Color(0xFF1A1A1A)
                             )
                             Text(
                                 formatDuration(day.durationMs),
                                 fontSize = 10.sp,
-                                color = Color.Black
+                                color = Color(0xFF1A1A1A)
                             )
                             Text(
                                 "%.0f kcal".format(day.kcal),
                                 fontSize = 10.sp,
-                                color = Color.Black
+                                color = Color(0xFF1A1A1A)
                             )
                         }
                     }
@@ -2526,22 +3360,75 @@ private fun WeeklyStatsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // 요약 정보
-        val totalKm = days.sumOf { it.valueKm }
-        val totalKcal = days.sumOf { it.kcal }
-        val totalRuns = weekRuns.size
-        val totalDurationMs = days.sumOf { it.durationMs }
-
-        Text("요약", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-        Spacer(Modifier.height(8.dp))
-        Text("최근 1주일 총 러닝 횟수: ${totalRuns}회")
-        Text("최근 1주일 총 거리: ${"%.1f".format(totalKm)} km")
-        Text("최근 1주일 총 러닝 시간: ${formatDuration(totalDurationMs)}")
-        Text("최근 1주일 총 소모 칼로리: ${"%.0f".format(totalKcal)} kcal")
-
-        NearbyRoutesSection(
-            viewModel = viewModel,
-            onRouteClick = { id -> selectedRouteId = id }
+        Text(
+            text = if (achievedTodayGoal) "목표 수치 달성!" else "오늘도 달려볼까요?",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 28.sp,
+            color = Color(0xFF1A1A1A)
         )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = if (dailyGoalKm > 0.0) {
+                "오늘 ${"%.1f".format(todayDistanceKm)}km / 목표 ${"%.1f".format(dailyGoalKm)}km"
+            } else {
+                "프로필에서 일일 목표를 설정해 보세요"
+            },
+            color = Color(0xFF2A2A2A)
+        )
+        Spacer(Modifier.height(14.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SummaryCardTile(
+                modifier = Modifier.weight(1f),
+                title = "러닝 횟수",
+                value = "${totalRuns}회"
+            )
+            SummaryCardTile(
+                modifier = Modifier.weight(1f),
+                title = "총 러닝 거리",
+                value = "${"%.1f".format(totalKm)} km"
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SummaryCardTile(
+                modifier = Modifier.weight(1f),
+                title = "총 러닝 시간",
+                value = formatDuration(totalDurationMs)
+            )
+            SummaryCardTile(
+                modifier = Modifier.weight(1f),
+                title = "총 소모 칼로리",
+                value = "${"%.0f".format(totalKcal)} kcal"
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        SummaryCardTile(
+            modifier = Modifier.fillMaxWidth(),
+            title = "평균 페이스",
+            value = avgPaceText
+        )
+        Spacer(Modifier.height(20.dp))
     }
 }
+
+@Composable
+private fun SummaryCardTile(
+    modifier: Modifier = Modifier,
+    title: String,
+    value: String
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
+        elevation = CardDefaults.cardElevation(1.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(title, fontSize = 13.sp, color = Color(0xFF2A2A2A))
+            Spacer(Modifier.height(6.dp))
+            Text(value, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1A1A1A))
+        }
+    }
+}
+

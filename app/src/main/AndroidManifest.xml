@@ -11,8 +11,8 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher"
+        android:icon="@drawable/app_icon"
+        android:roundIcon="@drawable/app_icon"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.RunningSpot"
@@ -31,7 +31,9 @@
         <activity
             android:name=".RunningActivity"
             android:theme="@style/Theme.Material3.DayNight.NoActionBar" />
-        <activity android:name=".CommunityActivity"/>
+        <activity
+            android:name=".CommunityActivity"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
             android:exported="true">
@@ -39,12 +41,12 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakao4a0414c61069e75577764b8ea65c26e9" android:host="oauth"/>
+                <data android:scheme="kakao761f8d0c71257bbbcebf7f4b89082f9f" android:host="oauth"/>
             </intent-filter>
         </activity>
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
-            android:value="4a0414c61069e75577764b8ea65c26e9" />
+            android:value="761f8d0c71257bbbcebf7f4b89082f9f" />
     </application>
 
 </manifest>

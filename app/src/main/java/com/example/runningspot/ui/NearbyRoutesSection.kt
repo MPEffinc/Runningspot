@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,19 +28,27 @@ import com.example.runningspot.viewmodel.RouteViewModel
 fun NearbyRoutesSection(
     viewModel: RouteViewModel,
     onRouteClick: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    autoLoadNearbyOnStart: Boolean = true
 ) {
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    // TODO: 나중에는 실제 현재 위치로 교체
-    LaunchedEffect(Unit) {
-        viewModel.loadNearbyRoutes(lat = 37.4, lng = 126.6)
+    // 러닝 화면에서는 외부에서 위치 기반 로드를 제어할 수 있게 옵션화
+    LaunchedEffect(autoLoadNearbyOnStart) {
+        if (autoLoadNearbyOnStart) {
+            viewModel.loadNearbyRoutes(lat = 37.4, lng = 126.6)
+        }
     }
 
     Column(modifier = modifier) {
         Spacer(Modifier.height(28.dp))
-        Text("📍 주변 공유 러닝 루트", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "주변 공유 러닝 루트",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF1A1A1A)
+        )
         Spacer(Modifier.height(8.dp))
 
         when {
@@ -47,13 +56,12 @@ fun NearbyRoutesSection(
                 Text("서버 에러: $error", color = Color.Red, fontSize = 13.sp)
             }
             nearbyRoutes.isEmpty() -> {
-                Text("주변에 표시할 러닝 루트가 없습니다.", fontSize = 13.sp, color = Color.Gray)
+                Text("주변에 표시할 러닝 루트가 없습니다.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             else -> {
                 LazyColumn(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 360.dp), // 화면 전체를 잡아먹지 않게 제한(원하면 조절)
+                        .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(nearbyRoutes.size) { i ->
@@ -62,14 +70,20 @@ fun NearbyRoutesSection(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onRouteClick(r.id) },
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
                             elevation = CardDefaults.cardElevation(2.dp)
                         ) {
                             Column(Modifier.padding(12.dp)) {
-                                Text(r.title, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    r.title,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF1A1A1A)
+                                )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    "거리: ${"%.2f".format(r.distance_m / 1000.0)} km",
-                                    fontSize = 13.sp
+                                    "거리: ${"%.1f".format(r.distance_m / 1000.0)} km",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF2A2A2A)
                                 )
                             }
                         }
