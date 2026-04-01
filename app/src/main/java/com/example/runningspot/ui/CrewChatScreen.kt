@@ -19,6 +19,8 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.Color
 data class CrewMessage(
     val id: String = "",
     val uid: String = "",
@@ -36,6 +38,7 @@ fun CrewChatScreen(crewId: String) {
 
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<CrewMessage>>(emptyList()) }
+    val listState = rememberLazyListState()
 
     // ✅ 멤버 여부 (멤버만 채팅 가능)
     var isMember by remember { mutableStateOf(false) }
@@ -90,9 +93,19 @@ fun CrewChatScreen(crewId: String) {
             onDispose { reg.remove() }
         }
     }
-
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("크루 채팅") }) }
+        containerColor = Color(0xFFFAFAF8),
+        topBar = {
+            TopAppBar(
+                title = { Text("크루 채팅", color = Color(0xFF1A1A1A)) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFAFAF8))
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -102,11 +115,12 @@ fun CrewChatScreen(crewId: String) {
 
             // 메시지 리스트
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
             ) {
                 items(messages, key = { it.id }) { msg ->
                     val isMe = (myUid != null && msg.uid == myUid)
@@ -116,6 +130,8 @@ fun CrewChatScreen(crewId: String) {
                         horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
                     ) {
                         Surface(
+                            color = if (isMe) Color(0xFFF0F0EE) else Color(0xFF204996),
+                            contentColor = if (isMe) Color(0xFF1A1A1A) else Color(0xFFFAFAF8),
                             tonalElevation = 2.dp,
                             shape = MaterialTheme.shapes.medium
                         ) {
@@ -123,7 +139,8 @@ fun CrewChatScreen(crewId: String) {
                                 if (!isMe) {
                                     Text(
                                         text = msg.username.ifBlank { "사용자" },
-                                        style = MaterialTheme.typography.labelSmall
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFF0F0EE)
                                     )
                                     Spacer(Modifier.height(2.dp))
                                 }
@@ -138,6 +155,7 @@ fun CrewChatScreen(crewId: String) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .imePadding()
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

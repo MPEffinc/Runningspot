@@ -40,6 +40,7 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import android.graphics.Color as AColor
+import androidx.compose.material3.MaterialTheme
 
 @Composable
 fun RouteDetailScreen(
@@ -77,13 +78,13 @@ fun RouteDetailScreen(
                 Text("서버 에러: $error", color = Color.Red)
             }
             route == null -> {
-                Text("불러오는 중...", color = Color.Gray)
+                Text("불러오는 중...", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             else -> {
                 val r = route!!
                 Text(r.title, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("거리: ${"%.2f".format(r.distance_m / 1000.0)} km", fontSize = 13.sp)
+                Text("거리: ${"%.1f".format(r.distance_m / 1000.0)} km", fontSize = 13.sp)
 
                 Spacer(Modifier.height(12.dp))
 
@@ -92,7 +93,7 @@ fun RouteDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(280.dp)
-                        .background(Color(0xFFEFEFEF))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 )
 
                 Spacer(Modifier.height(12.dp))

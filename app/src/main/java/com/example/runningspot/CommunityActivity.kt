@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -61,6 +63,22 @@ import com.example.runningspot.data.repository.fetchMyRoutes
 import com.example.runningspot.ui.RouteMapByRouteDetail
 import com.example.runningspot.viewmodel.RouteDetailViewModel
 
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
+import com.example.runningspot.ui.theme.DialogContainer
+import com.example.runningspot.ui.theme.DialogText
+import com.example.runningspot.ui.theme.DialogTitle
+import com.example.runningspot.ui.theme.RunningSpotTheme
+import java.io.File
+import java.io.FileOutputStream
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +90,9 @@ class CommunityActivity : ComponentActivity() {
             }
             setContent {
                 CrewDetailScreen(crewId = crewId)
+                RunningSpotTheme {
+                    CrewDetailScreen(crewId = crewId)
+                }
             }
             return
         }
@@ -81,7 +102,11 @@ class CommunityActivity : ComponentActivity() {
                 finish()
                 return
             }
-            setContent { CrewChatScreen(crewId = crewId) }
+            setContent {
+                RunningSpotTheme {
+                    CrewChatScreen(crewId = crewId)
+                }
+            }
             return
         }
 
@@ -92,12 +117,30 @@ class CommunityActivity : ComponentActivity() {
         if (isWriteMode) {
             val userName = intent.getStringExtra("userName") ?: "익명 사용자"
             val writeType = intent.getStringExtra("writeType") ?: "post"
+            val editDocId = intent.getStringExtra("editDocId")
+            val initialTitle = intent.getStringExtra("initialTitle")
+            val initialContent = intent.getStringExtra("initialContent")
+            val initialImageUri = intent.getStringExtra("initialImageUri")
 
             setContent {
                 if (writeType == "crew") {
                     CrewWriteScreen(userName = userName)
                 } else {
                     WritePostScreen(userName, prefs) // ✅ 기존 피드 글쓰기 그대로
+                    RunningSpotTheme {
+                        if (writeType == "crew") {
+                            CrewWriteScreen(userName = userName)
+                        } else {
+                            WritePostScreen(
+                                userName = userName,
+                                prefs = prefs,
+                                editDocId = editDocId,
+                                initialTitle = initialTitle,
+                                initialContent = initialContent,
+                                initialImageUri = initialImageUri
+                            )
+                        }
+                    }
                 }
             }
         } else {
@@ -118,30 +161,44 @@ class CommunityActivity : ComponentActivity() {
             val docId = intent.getStringExtra("docId")
             val routeId = intent.getLongExtra("routeId", -1L).let { if (it == -1L) null else it }
             setContent {
-                CommunityDetailScreen(
-                    title = title,
-                    hashtags = listOf("러닝"),
-                    authorName = authorName,
-                    userName = userName,
-                    content = content,
-                    postId = postId,
-                    imageRes = imageRes,
-                    imageUri = imageUri,
-                    initialLikes = savedLikes,
-                    initialComments = savedComments,
-                    distanceKm = distanceKm,
-                    pace = pace,
-                    durationText = durationText,
-                    calories = calories,
-                    docId = docId,
-                    routeId = routeId,
-                    onUpdateStats = { likes, comments ->
-                        prefs.edit()
-                            .putInt("likes_$postId", likes)
-                            .putInt("comments_$postId", comments)
-                            .apply()
-                    },
-                )
+                RunningSpotTheme {
+                    CommunityDetailScreen(
+                        title = title,
+                        hashtags = listOf("러닝"),
+                        authorName = authorName,
+                        userName = userName,
+                        content = content,
+                        postId = postId,
+                        imageRes = imageRes,
+                        imageUri = imageUri,
+                        initialLikes = savedLikes,
+                        initialComments = savedComments,
+                        distanceKm = distanceKm,
+                        pace = pace,
+                        durationText = durationText,
+                        calories = calories,
+                        docId = docId,
+                        routeId = routeId,
+                        onEditRequest = { editableDocId, editableTitle, editableContent, editableImageUri ->
+                            val editIntent = Intent(this@CommunityActivity, CommunityActivity::class.java).apply {
+                                putExtra("isWriteMode", true)
+                                putExtra("writeType", "post")
+                                putExtra("userName", userName)
+                                putExtra("editDocId", editableDocId)
+                                putExtra("initialTitle", editableTitle)
+                                putExtra("initialContent", editableContent)
+                                putExtra("initialImageUri", editableImageUri)
+                            }
+                            startActivity(editIntent)
+                        },
+                        onUpdateStats = { likes, comments ->
+                            prefs.edit()
+                                .putInt("likes_$postId", likes)
+                                .putInt("comments_$postId", comments)
+                                .apply()
+                        },
+                    )
+                }
             }
         }
     }
@@ -155,6 +212,7 @@ fun CrewWriteScreen(userName: String) {
     var location by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var maxMembersText by remember { mutableStateOf("5") }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("크루 모집글 작성") }) }
@@ -205,6 +263,7 @@ fun CrewWriteScreen(userName: String) {
 
             Button(
                 onClick = {
+                    if (isSubmitting) return@Button
                     if (title.isBlank() || location.isBlank() || description.isBlank()) {
                         Toast.makeText(context, "모든 항목을 입력해주세요", Toast.LENGTH_SHORT).show()
                         return@Button
@@ -220,8 +279,8 @@ fun CrewWriteScreen(userName: String) {
                         Toast.makeText(context, "로그인이 필요합니다", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-
                     val db = FirebaseFirestore.getInstance()
+                    isSubmitting = true
                     val crewRef = db.collection("crews").document()   // ✅ ID를 미리 확보
                     val crewId = crewRef.id
                     val memberRef = crewRef.collection("members").document(user.uid)
@@ -247,15 +306,38 @@ fun CrewWriteScreen(userName: String) {
                             "joinedAt" to FieldValue.serverTimestamp()
                         ))
                     }.addOnSuccessListener {
+                        isSubmitting = false
                         Toast.makeText(context, "크루 모집글 등록 완료", Toast.LENGTH_SHORT).show()
                         (context as? Activity)?.finish()
                     }.addOnFailureListener { e ->
+                        isSubmitting = false
                         Toast.makeText(context, "등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 },
+                enabled = !isSubmitting,
+                colors = ButtonDefaults.buttonColors(
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFFF0F0EE)
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("등록")
+                Text(if (isSubmitting) "등록 중..." else "등록")
+            }
+            if (isSubmitting) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    containerColor = DialogContainer,
+                    titleContentColor = DialogTitle,
+                    textContentColor = DialogText,
+                    confirmButton = {},
+                    title = { Text("처리 중") },
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                            Text("크루 모집글을 등록하고 있어요")
+                        }
+                    }
+                )
             }
         }
     }
@@ -263,14 +345,41 @@ fun CrewWriteScreen(userName: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WritePostScreen(userName: String, prefs: SharedPreferences) {
+fun WritePostScreen(
+    userName: String,
+    prefs: SharedPreferences,
+    editDocId: String? = null,
+    initialTitle: String? = null,
+    initialContent: String? = null,
+    initialImageUri: String? = null
+) {
     val context = LocalContext.current
+    val isEditMode = !editDocId.isNullOrBlank()
 
-    var title by remember { mutableStateOf("") }
-    var content by remember { mutableStateOf("") }
+    fun createGrayLogoTempUri(): Uri? {
+        return runCatching {
+            val source = BitmapFactory.decodeResource(context.resources, R.drawable.app_logo)
+                ?: return null
+            val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            val paint = Paint().apply {
+                colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+            }
+            canvas.drawBitmap(source, 0f, 0f, paint)
+            val outFile = File(context.cacheDir, "post_default_logo_gray.jpg")
+            FileOutputStream(outFile).use { stream ->
+                out.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+            }
+            Uri.fromFile(outFile)
+        }.getOrNull()
+    }
+    var title by remember { mutableStateOf(initialTitle.orEmpty()) }
+    var content by remember { mutableStateOf(initialContent.orEmpty()) }
+    var previewImageUrl by remember { mutableStateOf(initialImageUri) }
     var hashtags by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var selectedRun by remember { mutableStateOf<RunSummaryRef?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
     //사진 선택 런처
     val imagePicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -280,6 +389,7 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
                 selectedImageUri = uri
+                previewImageUrl = null
             }
         }
 
@@ -298,7 +408,7 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
         }
     }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("게시글 작성") }) }
+        topBar = { TopAppBar(title = { Text(if (isEditMode) "게시글 수정" else "게시글 작성") }) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -353,6 +463,9 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                 // 간단 Dialog 예시(바텀시트로 바꿔도 됨)
                 AlertDialog(
                     onDismissRequest = { showPicker = false },
+                    containerColor = DialogContainer,
+                    titleContentColor = DialogTitle,
+                    textContentColor = DialogText,
                     title = { Text("내 루트 선택") },
                     text = {
                         Column {
@@ -371,7 +484,7 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
             }
             selectedRun?.let { run ->
                 Spacer(Modifier.height(12.dp))
-                Text("거리: ${"%.2f".format(run.distanceM / 1000)} km")
+                Text("거리: ${"%.1f".format(run.distanceM / 1000)} km")
                 Text("시간: ${formatDuration(run.durationMs)}")
                 Text(
                     "페이스: ${
@@ -388,10 +501,10 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                 Text("사진 첨부하기")
             }
 
-            selectedImageUri?.let {
+            if (selectedImageUri != null || !previewImageUrl.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Image(
-                    painter = rememberAsyncImagePainter(it),
+                    painter = rememberAsyncImagePainter(selectedImageUri ?: previewImageUrl),
                     contentDescription = "선택된 이미지",
                     modifier = Modifier
                         .height(200.dp)
@@ -403,7 +516,10 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
 
             Button(
                 onClick = {
-                    if (title.isBlank() || content.isBlank()) {
+                    if (isSubmitting) return@Button
+                    val trimmedTitle = title.trim()
+                    val trimmedContent = content.trim()
+                    if (trimmedTitle.isBlank() || trimmedContent.isBlank()) {
                         Toast.makeText(context, "제목/내용을 입력해주세요", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
@@ -415,16 +531,17 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                     }
 
                     val db = FirebaseFirestore.getInstance()
+                    isSubmitting = true
 
                     // ✅ 1) 먼저 업로드할 이미지가 있으면 Storage 업로드 → downloadUrl 얻기
                     val localImageUri = selectedImageUri
 
                     fun savePost(imageDownloadUrl: String?) {
                         val postData = hashMapOf(
-                            "title" to title,
+                            "title" to trimmedTitle,
                             "userId" to user.uid,
                             "userName" to (userName ?: user.displayName ?: "익명"),
-                            "content" to content,
+                            "content" to trimmedContent,
                             // ✅ Firestore에는 content:// 말고 downloadUrl을 저장
                             "imageUrls" to listOfNotNull(imageDownloadUrl),
 
@@ -448,16 +565,47 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                         db.collection("posts")
                             .add(postData)
                             .addOnSuccessListener {
+                                isSubmitting = false
                                 Toast.makeText(context, "게시글 등록 완료", Toast.LENGTH_SHORT).show()
                                 (context as? Activity)?.finish()
                             }
                             .addOnFailureListener { e ->
+                                isSubmitting = false
                                 Toast.makeText(context, "등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                     }
 
                     // ✅ 이미지 없으면 그냥 저장
-                    if (localImageUri == null) {
+                    fun updatePost(imageDownloadUrl: String?) {
+                        val updateData = hashMapOf<String, Any>(
+                            "title" to trimmedTitle,
+                            "content" to trimmedContent,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                        updateData["imageUrls"] = listOfNotNull(imageDownloadUrl)
+
+                        db.collection("posts")
+                            .document(editDocId!!)
+                            .update(updateData)
+                            .addOnSuccessListener {
+                                isSubmitting = false
+                                Toast.makeText(context, "게시글 수정 완료", Toast.LENGTH_SHORT).show()
+                                (context as? Activity)?.finish()
+                            }
+                            .addOnFailureListener { e ->
+                                isSubmitting = false
+                                Toast.makeText(context, "수정 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+
+                    if (isEditMode && localImageUri == null) {
+                        updatePost(previewImageUrl)
+                        return@Button
+                    }
+
+                    // ✅ 이미지 없으면 기본 흑백 로고를 업로드
+                    val uploadUri = if (isEditMode) localImageUri else (localImageUri ?: createGrayLogoTempUri())
+                    if (uploadUri == null) {
                         savePost(null)
                         return@Button
                     }
@@ -467,21 +615,54 @@ fun WritePostScreen(userName: String, prefs: SharedPreferences) {
                     val fileName = "${UUID.randomUUID()}.jpg"
                     val ref = storage.reference.child("posts/${user.uid}/$fileName")
 
-                    ref.putFile(localImageUri)
+                    ref.putFile(uploadUri)
                         .continueWithTask { task ->
                             if (!task.isSuccessful) throw (task.exception ?: Exception("이미지 업로드 실패"))
                             ref.downloadUrl
                         }
                         .addOnSuccessListener { downloadUri ->
-                            savePost(downloadUri.toString())
+                            if (isEditMode) {
+                                updatePost(downloadUri.toString())
+                            } else {
+                                savePost(downloadUri.toString())
+                            }
                         }
                         .addOnFailureListener { e ->
+                            isSubmitting = false
                             Toast.makeText(context, "이미지 업로드 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                 },
+                enabled = !isSubmitting,
+                colors = ButtonDefaults.buttonColors(
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFFF0F0EE)
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("게시글 등록")
+                Text(
+                    if (isSubmitting) {
+                        if (isEditMode) "수정 중..." else "등록 중..."
+                    } else {
+                        if (isEditMode) "게시글 수정" else "게시글 등록"
+                    }
+                )
+            }
+
+            if (isSubmitting) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    containerColor = DialogContainer,
+                    titleContentColor = DialogTitle,
+                    textContentColor = DialogText,
+                    confirmButton = {},
+                    title = { Text("처리 중") },
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                            Text("게시글을 등록하고 있어요")
+                        }
+                    }
+                )
             }
         }
     }
@@ -511,7 +692,8 @@ fun CommunityDetailScreen(
     calories: Double?,
     onUpdateStats: (Int, Int) -> Unit,
     docId: String?,
-    routeId: Long?
+    routeId: Long?,
+    onEditRequest: (docId: String, title: String, content: String, imageUri: String?) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -525,6 +707,10 @@ fun CommunityDetailScreen(
             emptyList()
         )
     }
+    var showImagePreview by remember { mutableStateOf(false) }
+    var showDeletePostConfirm by remember { mutableStateOf(false) }
+    var deleteCommentTargetId by remember { mutableStateOf<String?>(null) }
+    var isSubmittingComment by remember { mutableStateOf(false) }
     var newComment by remember { mutableStateOf("") }
     val routeVm: RouteDetailViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val routeDetail by routeVm.route.collectAsState()
@@ -556,34 +742,26 @@ fun CommunityDetailScreen(
         topBar = {
             TopAppBar(
                 title = { Text("커뮤니티", fontSize = 20.sp) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFAFAF8)),
                 actions = {
                     val canDelete = (myUid != null && postAuthorId != null && myUid == postAuthorId)
                     if (canDelete) {
+                        Text(
+                            "수정",
+                            color = Color(0xFF204996),
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .clickable {
+                                    val safeDocId = docId ?: return@clickable
+                                    onEditRequest(safeDocId, title, content, imageUri)
+                                }
+                        )
                         Text(
                             "삭제",
                             color = Color.Red,
                             modifier = Modifier
                                 .padding(end = 16.dp)
-                                .clickable {
-                                    val safeDocId = docId
-                                    if (safeDocId == null) {
-                                        Toast.makeText(context, "삭제할 문서 ID가 없어요", Toast.LENGTH_SHORT).show()
-                                        return@clickable
-                                    }
-
-                                    scope.launch {
-                                        try {
-                                            repo.deletePost(safeDocId)
-                                            Toast.makeText(context, "삭제 완료", Toast.LENGTH_SHORT).show()
-                                            (context as? Activity)?.finish()
-                                        } catch (e: Exception) {
-                                            Toast.makeText(
-                                                context,
-                                                "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
+                                .clickable { showDeletePostConfirm = true }
                         )
                     }
                 }
@@ -597,38 +775,112 @@ fun CommunityDetailScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
                 .fillMaxSize()
+                .imePadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
         ) {
 
             // 이미지
-            if (imageUri?.isNotBlank() == true) {
-                Image(
-                    painter = rememberAsyncImagePainter(Uri.parse(imageUri)),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .clip(RoundedCornerShape(20.dp)),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Image(
-                    painter = painterResource(id = imageRes),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .clip(RoundedCornerShape(20.dp)),
-                    contentScale = ContentScale.Crop
-                )
+            when {
+                imageUri?.isNotBlank() == true -> {
+                    Image(
+                        painter = rememberAsyncImagePainter(Uri.parse(imageUri)),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { showImagePreview = true },
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                imageRes != 0 -> {
+                    Image(
+                        painter = painterResource(id = imageRes),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { showImagePreview = true },
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+
+            if (showImagePreview) {
+                Dialog(
+                    onDismissRequest = { showImagePreview = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                            .clickable { showImagePreview = false }
+                    ) {
+                        when {
+                            imageUri?.isNotBlank() == true -> {
+                                Image(
+                                    painter = rememberAsyncImagePainter(Uri.parse(imageUri)),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .align(Alignment.Center),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                            imageRes != 0 -> {
+                                Image(
+                                    painter = painterResource(id = imageRes),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .align(Alignment.Center),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { showImagePreview = false },
+                            modifier = Modifier
+                                .statusBarsPadding()
+                                .padding(8.dp)
+                                .align(Alignment.TopStart)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "닫기",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
 
             Text(
+                text = title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF204996)
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = authorName,
+                fontSize = 13.sp,
+                color = Color(0xFF2A2A2A),
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(Modifier.height(12.dp))
+
+            Text(
                 content,
                 fontSize = 16.sp,
                 lineHeight = 23.sp,
-                color = Color(0xFF222222)
+                color = Color(0xFF1A1A1A)
             )
 
             Spacer(Modifier.height(16.dp))
@@ -638,12 +890,12 @@ fun CommunityDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFFEDE7F6))
+                        .background(Color(0x33F1B243))
                         .padding(18.dp)
                 ) {
                     Text("🏃 러닝 정보", fontWeight = FontWeight.Bold, fontSize = 17.sp)
                     Spacer(Modifier.height(10.dp))
-                    Text("거리: ${"%.2f".format(distanceKm)} km", fontSize = 15.sp)
+                    Text("거리: ${"%.1f".format(distanceKm)} km", fontSize = 15.sp)
                     Text("시간: $durationText", fontSize = 15.sp)
                     Text("페이스: $pace", fontSize = 15.sp)
                     if (calories != null) {
@@ -715,7 +967,7 @@ fun CommunityDetailScreen(
                     Icon(
                         imageVector = Icons.Outlined.ChatBubbleOutline,
                         contentDescription = null,
-                        tint = Color(0xFF8E7CC3),
+                        tint = Color(0xFF204996),
                         modifier = Modifier.size(20.dp)
                     )
                     Text("${comments.size}", fontSize = 15.sp)
@@ -740,12 +992,15 @@ fun CommunityDetailScreen(
                 Spacer(Modifier.width(10.dp))
 
                 Button(
+                    enabled = !isSubmittingComment,
                     onClick = {
+                        if (isSubmittingComment) return@Button
                         val safeDocId = docId ?: run {
                             Toast.makeText(context, "댓글을 달 문서 ID가 없어요", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         if (newComment.isBlank()) return@Button
+                        isSubmittingComment = true
 
                         scope.launch {
                             try {
@@ -755,14 +1010,20 @@ fun CommunityDetailScreen(
                                 onUpdateStats(likes, comments.size)
                             } catch (e: Exception) {
                                 Toast.makeText(context, "댓글 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }finally {
+                                isSubmittingComment = false
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C4CD3)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF204996),
+                        disabledContainerColor = Color(0xFF2A2A2A),
+                        disabledContentColor = Color(0xFFF0F0EE)
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.height(54.dp)
                 ) {
-                    Text("등록", fontSize = 15.sp)
+                    Text(if (isSubmittingComment) "등록 중..." else "등록", fontSize = 15.sp)
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -776,7 +1037,7 @@ fun CommunityDetailScreen(
                             Text(
                                 text = (c.userName.ifBlank { c.userId.take(6) }),
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF6C4CD3),
+                                color = Color(0xFF204996),
                                 fontSize = 15.sp
                             )
                             Text(
@@ -793,18 +1054,7 @@ fun CommunityDetailScreen(
                                     text = "삭제",
                                     color = Color.Red,
                                     fontSize = 13.sp,
-                                    modifier = Modifier.clickable {
-                                        val safeDocId = docId ?: return@clickable
-                                        scope.launch {
-                                            try {
-                                                repo.deleteComment(safeDocId, commentId)
-                                                comments = repo.fetchComments(safeDocId)
-                                                onUpdateStats(likes, comments.size)
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "댓글 삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
+                                    modifier = Modifier.clickable { deleteCommentTargetId = commentId }
                                 )
                             }
                         }
@@ -814,6 +1064,85 @@ fun CommunityDetailScreen(
 
             Spacer(Modifier.height(20.dp))
 
+        }
+        if (showDeletePostConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeletePostConfirm = false },
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                title = { Text("삭제 확인") },
+                text = { Text("삭제하시겠습니까?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDeletePostConfirm = false
+                            val safeDocId = docId ?: return@TextButton
+                            scope.launch {
+                                try {
+                                    repo.deletePost(safeDocId)
+                                    Toast.makeText(context, "삭제 완료", Toast.LENGTH_SHORT).show()
+                                    (context as? Activity)?.finish()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    ) { Text("삭제") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeletePostConfirm = false }) { Text("취소") }
+                }
+            )
+        }
+
+        if (deleteCommentTargetId != null) {
+            AlertDialog(
+                onDismissRequest = { deleteCommentTargetId = null },
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                title = { Text("삭제 확인") },
+                text = { Text("삭제하시겠습니까?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val targetId = deleteCommentTargetId ?: return@TextButton
+                            deleteCommentTargetId = null
+                            val safeDocId = docId ?: return@TextButton
+                            scope.launch {
+                                try {
+                                    repo.deleteComment(safeDocId, targetId)
+                                    comments = repo.fetchComments(safeDocId)
+                                    onUpdateStats(likes, comments.size)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "댓글 삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    ) { Text("삭제") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deleteCommentTargetId = null }) { Text("취소") }
+                }
+            )
+        }
+
+        if (isSubmittingComment) {
+            AlertDialog(
+                onDismissRequest = {},
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                confirmButton = {},
+                title = { Text("처리 중") },
+                text = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        Text("댓글을 등록하고 있어요")
+                    }
+                }
+            )
         }
     }
 }
@@ -890,7 +1219,7 @@ fun CrewDetailScreen(
             // ----- 크루 정보 -----
             Text(c.title, fontWeight = FontWeight.Bold, fontSize = 22.sp)
             Spacer(Modifier.height(6.dp))
-            Text(c.location, color = Color.Gray)
+            Text(c.location, color = Color(0xFF2A2A2A))
             Spacer(Modifier.height(12.dp))
             Text(c.description)
             Spacer(Modifier.height(12.dp))

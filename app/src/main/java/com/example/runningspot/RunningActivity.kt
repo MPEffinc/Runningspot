@@ -54,6 +54,8 @@ import com.google.android.material.button.MaterialButton
 import com.example.runningspot.ui.getCircularBitmap
 import com.kakao.vectormap.GestureType
 import kotlinx.coroutines.launch
+import android.os.Handler
+import android.os.Looper
 
 
 class RunningActivity : ComponentActivity() {
@@ -87,6 +89,17 @@ class RunningActivity : ComponentActivity() {
     private var startTime = 0L
     private var elapsedTime = 0L
     private var totalDistance = 0.0
+    private var pauseStartedAt = 0L
+    private var accumulatedPauseMs = 0L
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private val timerTicker = object : Runnable {
+        override fun run() {
+            if (isRunning && !isPaused) {
+                updateUI()
+                timerHandler.postDelayed(this, 1000L)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,133 +122,132 @@ class RunningActivity : ComponentActivity() {
             userMarkerBitmap = loadUserRunningMarkerBitmap(this, userMarkerImageUri)
         }
 
-        // ✅ 상단 UI (거리 & 시간)
+        // ✅ 하단 인디케이터 UI (불투명 카드형 2x2)
         val infoLayout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(40, 40, 40, 40)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.parseColor("#66000000"))
-                cornerRadius = 30f
-            }
+            setPadding(0, 0, 0, 0)
         }
+
+        fun makeStatTile(title: String): Pair<android.view.View, TextView> {
+            val valueView = TextView(this).apply {
+                text = "-"
+                setTextColor(Color.parseColor("#1A1A1A"))
+                textSize = 26f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+            val container = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(24, 20, 24, 20)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.parseColor("#F0F0EE"))
+                    cornerRadius = 20f
+                }
+                addView(TextView(this@RunningActivity).apply {
+                    text = title
+                    setTextColor(Color.parseColor("#2A2A2A"))
+                    textSize = 15f
+                })
+                addView(valueView)
+            }
+            return container to valueView
+        }
+        val (paceTile, paceValue) = makeStatTile("평균 페이스")
+        val (timeTile, timeValue) = makeStatTile("시간")
+        val (kcalTile, kcalValue) = makeStatTile("소모 칼로리")
+        val (distTile, distValue) = makeStatTile("러닝 거리")
+
+        txtPace = paceValue
+        txtTime = timeValue
+        txtCalories = kcalValue
+        txtDistance = distValue
         //첫째줄에 시간, 거리 표시
         val firstRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 14)
+            addView(paceTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 })
+            addView(timeTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 8 })
         }
-        txtTime = TextView(this).apply {
-            text = "⏱ 00:00"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-        }
-        txtDistance = TextView(this).apply {
-            text = "📍 0.00 km"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            setPadding(48, 0, 0, 0)
-        }
-        firstRow.addView(txtTime)
-        firstRow.addView(txtDistance)
 
         val secondRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 0)
+            addView(kcalTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 })
+            addView(distTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 8 })
         }
-
-        txtPace = TextView(this).apply {
-            text = "⚡ -'--\""
-            setTextColor(Color.WHITE)
-            textSize = 18f
-        }
-
-        txtCalories = TextView(this).apply {
-            text = "🔥 0 kcal"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            setPadding(40, 0, 0, 0)
-        }
-
-        secondRow.addView(txtPace)
-        secondRow.addView(txtCalories)
 
         //레이아웃에 두 행 추가
         infoLayout.addView(firstRow)
         infoLayout.addView(secondRow)
 
-        val infoParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
-            topMargin = 64
-        }
-        root.addView(infoLayout, infoParams)
-
-        // ✅ 하단 “러닝 종료” 버튼
         val stopBtn = com.google.android.material.button.MaterialButton(this).apply {
             text = "러닝 종료"
             setBackgroundColor(Color.RED)
             setTextColor(Color.WHITE)
             setOnClickListener { stopRunningAndFinish() }
         }
-        val btnParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = android.view.Gravity.END or android.view.Gravity.BOTTOM
-            marginEnd = 48
-            bottomMargin = 96
-        }
-        root.addView(stopBtn, btnParams)
+
         gpsBtn = MaterialButton(this).apply {
             text = "현재 위치"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
 
-            val sizeW = (130 * resources.displayMetrics.density).toInt()
-            val sizeH = (50 * resources.displayMetrics.density).toInt()
-
-            layoutParams = FrameLayout.LayoutParams(sizeW, sizeH).apply {
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL   // 🔥 정확한 중앙 하단
-                bottomMargin = (24 * resources.displayMetrics.density).toInt()
-            }
-
-            // 항상 보이도록 (autoFollow와 관계 없이)
             visibility = View.VISIBLE
 
             setOnClickListener {
                 recenterToCurrentLocation()
             }
         }
-        root.addView(gpsBtn)
-
         // 하단 왼쪽 “일시정지/재개” 버튼
         val pauseBtn = com.google.android.material.button.MaterialButton(this).apply {
             text = "일시정지"
 
-            val sizeW = (120 * resources.displayMetrics.density).toInt()
-            val sizeH = (50 * resources.displayMetrics.density).toInt()
-
-            layoutParams = FrameLayout.LayoutParams(sizeW, sizeH).apply {
-                gravity = Gravity.BOTTOM or Gravity.START   // ← 좌측 하단
-                bottomMargin = (24 * resources.displayMetrics.density).toInt()
-                leftMargin = (24 * resources.displayMetrics.density).toInt()
-            }
-
-            setBackgroundColor(Color.DKGRAY)
+            setBackgroundColor(Color.parseColor("#6E7075"))
             setTextColor(Color.WHITE)
             setOnClickListener { togglePause(this) }
         }
-        val pauseParams = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
-            marginStart = 48
-            bottomMargin = 96
+        val buttonRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(16, 20, 16, 8)
+            addView(pauseBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(gpsBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(stopBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
-        root.addView(pauseBtn, pauseParams)
+
+        val bottomContainer = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(16, 20, 16, 12)
+            minimumHeight = (resources.displayMetrics.heightPixels * 0.22f).toInt()
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.parseColor("#FAFAF8"))
+                cornerRadii = floatArrayOf(28f, 28f, 28f, 28f, 0f, 0f, 0f, 0f)
+            }
+            addView(
+                infoLayout,
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+            addView(
+                buttonRow,
+                android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+            root.addView(
+                bottomContainer,
+                android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = android.view.Gravity.BOTTOM
+                    bottomMargin = 14
+                }
+            )
 
         // ✅ 레이아웃 최종 지정
         setContentView(root)
@@ -405,11 +417,17 @@ class RunningActivity : ComponentActivity() {
 
         isPaused = !isPaused
         btn.text = if (isPaused) "다시시작" else "일시정지"
+        btn.setBackgroundColor(
+            if (isPaused) Color.parseColor("#4CAF50") else Color.parseColor("#6E7075")
+        )
 
         if (isPaused) {
+            pauseStartedAt = SystemClock.elapsedRealtime()
+            timerHandler.removeCallbacks(timerTicker)
             // 일시정지 → 위치 업데이트 중단
             fused.removeLocationUpdates(locationCallback)
         } else {
+            accumulatedPauseMs += (SystemClock.elapsedRealtime() - pauseStartedAt)
             // 재개 → 권한 체크 후 위치 업데이트 재시작
             if (ActivityCompat.checkSelfPermission(
                     this,
@@ -417,10 +435,16 @@ class RunningActivity : ComponentActivity() {
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
                 fused.requestLocationUpdates(locationRequest, locationCallback, mainLooper)
+                timerHandler.post(timerTicker)
             } else {
                 Toast.makeText(this, "위치 권한이 필요합니다.", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+    private fun getElapsedDurationMs(): Long {
+        if (!isRunning) return 0L
+        val now = if (isPaused) pauseStartedAt else SystemClock.elapsedRealtime()
+        return (now - startTime - accumulatedPauseMs).coerceAtLeast(0L)
     }
 
     private fun recenterToCurrentLocation() {
@@ -486,22 +510,22 @@ class RunningActivity : ComponentActivity() {
 
     // ✅ 상단 UI 갱신
     private fun updateUI() {
-        val durationMs = SystemClock.elapsedRealtime() - startTime
+        val durationMs = getElapsedDurationMs()
         elapsedTime = durationMs / 1000
         val minutes = elapsedTime / 60
         val seconds = elapsedTime % 60
-        txtTime.text = "⏱ %02d:%02d".format(minutes, seconds)
-        txtDistance.text = "📍 %.2f km".format(totalDistance / 1000.0)
+        txtTime.text = "%02d:%02d".format(minutes, seconds)
+        txtDistance.text = "%.1f km".format(totalDistance / 1000.0)
         val paceSecondsPerKm = calcPace(totalDistance, durationMs)
         if (paceSecondsPerKm != null) {
             val paceMin = (paceSecondsPerKm / 60).toInt()
             val paceSec = (paceSecondsPerKm % 60).toInt()
-            txtPace.text = "⚡ %d'%02d\"".format(paceMin, paceSec)
+            txtPace.text = "%d'%02d\"".format(paceMin, paceSec)
         } else {
-            txtPace.text = "⚡ -'--\"" // 데이터 부족
+            txtPace.text = "-'--\"" // 데이터 부족
         }
         val calories = calcCalories(totalDistance)
-        txtCalories.text = "🔥 %.0f kcal".format(calories)
+        txtCalories.text = "%.0f kcal".format(calories)
     }
 
     // ✅ 러닝 시작 (지도 로드 완료 후 실행)
@@ -522,6 +546,8 @@ class RunningActivity : ComponentActivity() {
         runningPath.clear()
         totalDistance = 0.0
         startTime = SystemClock.elapsedRealtime()
+        pauseStartedAt = 0L
+        accumulatedPauseMs = 0L
         isRunning = true
         isPaused = false
 
@@ -537,18 +563,23 @@ class RunningActivity : ComponentActivity() {
         }
 
         fused.requestLocationUpdates(locationRequest, locationCallback, mainLooper)
+        timerHandler.removeCallbacks(timerTicker)
+        timerHandler.post(timerTicker)
+        updateUI()
         Toast.makeText(this, "러닝 시작!", Toast.LENGTH_SHORT).show()
     }
 
     // ✅ 러닝 종료 및 결과 반환
     private fun stopRunningAndFinish() {
+        val finalDurationMs = getElapsedDurationMs()
         isRunning = false
+        timerHandler.removeCallbacks(timerTicker)
         fused.removeLocationUpdates(locationCallback)
 
         // 결과 경로를 Intent로 반환
         val intent = Intent()
         intent.putExtra("runningDistance", totalDistance)
-        intent.putExtra("runningTime", SystemClock.elapsedRealtime() - startTime)
+        intent.putExtra("runningTime", finalDurationMs)
         intent.putExtra("pathSize", runningPath.size)
         runningPath.forEachIndexed { i, latLng ->
             intent.putExtra("lat_$i", latLng.latitude)
@@ -573,7 +604,7 @@ class RunningActivity : ComponentActivity() {
         val styles = if (userMarkerBitmap != null) {
             LabelStyle.from(userMarkerBitmap)
         } else {
-            LabelStyle.from(R.drawable.arrow)
+            LabelStyle.from(R.drawable.loc)
         }
         layer.addLabel(LabelOptions.from(p).setStyles(styles))
     }

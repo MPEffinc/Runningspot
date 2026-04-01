@@ -11,8 +11,8 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher"
+        android:icon="@drawable/app_icon"
+        android:roundIcon="@drawable/app_icon"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.RunningSpot"
@@ -31,7 +31,9 @@
         <activity
             android:name=".RunningActivity"
             android:theme="@style/Theme.Material3.DayNight.NoActionBar" />
-        <activity android:name=".CommunityActivity"/>
+        <activity
+            android:name=".CommunityActivity"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
             android:exported="true">
