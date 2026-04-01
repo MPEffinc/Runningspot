@@ -1,48 +1,52 @@
 package com.example.runningspot.ui
 
 import android.app.Activity
-import android.app.DownloadManager
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.auth.api.R as GoogleAuthR
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.kakao.sdk.auth.model.OAuthToken
 import com.kakao.sdk.user.UserApiClient
 import com.example.runningspot.R
 import com.example.runningspot.data.remote.ApiClient
 import com.example.runningspot.data.remote.KakaoAuthRequest
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 
 @Composable
 fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: String) -> Unit) {
@@ -50,77 +54,35 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
     val activity = context as? Activity
     var nickname by remember { mutableStateOf<String?>(null) }
     var profileUrl by remember { mutableStateOf<String?>(null) }
-    var provider by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
-    // ✅ Google SignIn 초기화
-    val gso = remember {
+    var showWelcome by remember { mutableStateOf(false) }
+
+    fun completeLogin(provider: String, name: String?, photoUrl: String?) {
+        nickname = name
+        profileUrl = photoUrl
+        showWelcome = true
+        loading = false
+
+        scope.launch {
+            // Both providers briefly show the same welcome state before navigation.
+            delay(650)
+            onLoginSuccess(name, photoUrl, provider)
+        }
+    }
+
+    // Compose lint 대응: LocalContext로 직접 문자열 조회하지 않고 stringResource를 사용
+    val webClientId = stringResource(id = R.string.default_web_client_id)
+    val gso = remember(webClientId) {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .requestIdToken(
-                context.getString(R.string.default_web_client_id)
-            )
+            .requestIdToken(webClientId)
             .build()
     }
-    val googleClient = remember(activity) {
-        // activity null일 수 있으니 널 세이프 처리
+    val googleClient = remember(activity, gso) {
         activity?.let { GoogleSignIn.getClient(it, gso) }
     }
 
-    val client = remember { OkHttpClient() }
-
-    // ✅ Google 로그인 Launcher
-    /*val googleLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            val idToken = account.idToken
-
-            if (idToken == null) {
-                Toast.makeText(context, "ID Token 없음", Toast.LENGTH_SHORT).show()
-                return@rememberLauncherForActivityResult
-            }
-
-            val credential = GoogleAuthProvider.getCredential(idToken, null)
-            FirebaseAuth.getInstance()
-                .signInWithCredential(credential)
-                .addOnSuccessListener { authResult ->
-                    val user = authResult.user
-
-                    scope.launch {
-                        try {
-                            val result = testUidFromServer("http://192.168.123.128:4000"/*"http://10.0.2.2:4000/"*/)
-                            Log.d("UID_TEST", "server response=$result")
-
-                            Toast.makeText(context, "서버 UID 테스트 성공", Toast.LENGTH_SHORT).show()
-
-                            onLoginSuccess(
-                                user?.displayName,
-                                user?.photoUrl?.toString(),
-                                "google"
-                            )
-                        } catch (e: Exception) {
-                            Log.e("UID_TEST", "UID test failed", e)
-                            Toast.makeText(
-                                context,
-                                "UID 테스트 실패: ${e.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                }
-                .addOnFailureListener { e ->
-                    Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
-                    Log.e("GOOGLE", "firebase signIn failed", e)
-                }
-
-        } catch (e: ApiException) {
-            Log.e("GOOGLE", "signIn failed code=${e.statusCode}", e)
-            Toast.makeText(context, "구글 로그인 실패(${e.statusCode})", Toast.LENGTH_SHORT).show()
-        }
-    }*/
     val googleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -139,11 +101,33 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                 .signInWithCredential(credential)
                 .addOnSuccessListener { authResult ->
                     val user = authResult.user
-                    onLoginSuccess(
-                        user?.displayName,
-                        user?.photoUrl?.toString(),
-                        "google"
-                    )
+                    scope.launch {
+                        try {
+                            val firebaseUser = FirebaseAuth.getInstance().currentUser
+                                ?: throw IllegalStateException("Firebase currentUser가 null")
+
+                            val userData = mutableMapOf<String, Any>(
+                                "provider" to "google",
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                            user?.displayName?.takeIf { it.isNotBlank() }?.let { userData["nickname"] = it }
+                            user?.photoUrl?.toString()?.takeIf { it.isNotBlank() }?.let { userData["profileUrl"] = it }
+
+                            FirebaseFirestore.getInstance()
+                                .collection("users")
+                                .document(firebaseUser.uid)
+                                .set(userData, SetOptions.merge())
+                                .await()
+                        } catch (e: Exception) {
+                            Log.w("GOOGLE", "users 문서 저장 실패", e)
+                        }
+
+                        completeLogin(
+                            provider = "google",
+                            name = user?.displayName,
+                            photoUrl = user?.photoUrl?.toString()
+                        )
+                    }
                 }
                 .addOnFailureListener { e ->
                     Toast.makeText(context, "Firebase 로그인 실패", Toast.LENGTH_SHORT).show()
@@ -156,7 +140,6 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
         }
     }
 
-    // ✅ Kakao 로그인 함수
     fun kakaoLogin() {
         val act = activity ?: run {
             Toast.makeText(context, "Activity 컨텍스트를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
@@ -168,7 +151,6 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                 Log.e("KAKAO", "login failed", error)
                 Toast.makeText(context, "카카오 로그인 실패", Toast.LENGTH_SHORT).show()
             } else if (token != null) {
-                // 1) 카카오 사용자 정보 조회(닉네임/프로필)
                 UserApiClient.instance.me { user, err ->
                     if (err != null || user == null) {
                         Log.e("KAKAO", "user info failed", err)
@@ -178,9 +160,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
 
                     nickname = user.kakaoAccount?.profile?.nickname
                     profileUrl = user.kakaoAccount?.profile?.thumbnailImageUrl
-                    provider = "kakao"
 
-                    // 2) 서버로 accessToken 보내서 Firebase customToken 받기
                     val accessToken = token.accessToken
                     scope.launch {
                         try {
@@ -190,7 +170,6 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 KakaoAuthRequest(kakaoAccessToken = accessToken)
                             )
 
-                            // 3) FirebaseAuth 로그인 (여기서 UID 생성됨)
                             FirebaseAuth.getInstance()
                                 .signInWithCustomToken(resp.customToken)
                                 .await()
@@ -198,20 +177,17 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                             val firebaseUser = FirebaseAuth.getInstance().currentUser
                                 ?: throw IllegalStateException("Firebase currentUser가 null")
 
-                            val currentNickname = nickname
-                            val currentProfileUrl = profileUrl
-
                             val userData = mutableMapOf<String, Any>(
                                 "provider" to "kakao",
                                 "updatedAt" to FieldValue.serverTimestamp()
                             )
 
-                            if (!currentNickname.isNullOrBlank()) {
-                                userData["nickname"] = currentNickname
+                            if (!nickname.isNullOrBlank()) {
+                                userData["nickname"] = nickname as String
                             }
 
-                            if (!currentProfileUrl.isNullOrBlank()) {
-                                userData["profileUrl"] = currentProfileUrl
+                            if (!profileUrl.isNullOrBlank()) {
+                                userData["profileUrl"] = profileUrl as String
                             }
 
                             FirebaseFirestore.getInstance()
@@ -219,7 +195,7 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 .document(firebaseUser.uid)
                                 .set(userData, SetOptions.merge())
                                 .await()
-                            // Firebase ID Token 발급 (중요: customToken이 아니라 idToken을 서버에 보냄)
+
                             val idToken = FirebaseAuth.getInstance()
                                 .currentUser
                                 ?.getIdToken(true)
@@ -227,15 +203,17 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 ?.token
                                 ?: throw IllegalStateException("Firebase ID Token 발급 실패")
 
-                            // /me 호출 -> 서버가 MySQL users에 생성/조회
                             val me = ApiClient.authApi.me("Bearer $idToken")
                             Log.d("AUTH", "Server /me ok uid=${me.uid}, userId=${me.userId}")
 
-                            // 이제 Firebase 콘솔 Users에 뜸
                             val uid = FirebaseAuth.getInstance().currentUser?.uid
                             Log.d("AUTH", "Firebase signIn success uid=$uid")
 
-                            onLoginSuccess(nickname, currentProfileUrl, provider!!)
+                            completeLogin(
+                                provider = "kakao",
+                                name = nickname,
+                                photoUrl = profileUrl
+                            )
                         } catch (e: Exception) {
                             Log.e("AUTH", "Firebase custom token login failed", e)
                             Toast.makeText(
@@ -258,59 +236,89 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
             api.loginWithKakaoAccount(act, callback = callback)
         }
     }
-    @Composable
-    fun LoginButtonKakao(
-        text: String,
-        enabled: Boolean,
-        onClick: () -> Unit
-    ) {
-        val kakaoYellow = Color(0xFFFEE500)
-        val kakaoText = Color(0xDE000000)
 
-        Image(
-            painter = painterResource(id = R.drawable.ic_kakao_symbol), // 👉 공식 버튼 이미지
-            contentDescription = "Kakao Login",
+    @Composable
+    fun KakaoBrandButton(enabled: Boolean, onClick: () -> Unit) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
             modifier = Modifier
-                .width(210.dp)
-                .height(56.dp)
-                .clickable { kakaoLogin() },
-            contentScale = ContentScale.FillBounds
-        )
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFFEE500),
+                contentColor = Color(0xFF191919)
+            )
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_kakaotalk_logo),
+                    contentDescription = "Kakao bubble",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = if (loading) "처리 중..." else "카카오 로그인",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 
     @Composable
-    fun LoginButtonGoogle(
-        text: String,
-        enabled: Boolean,
-        onClick: () -> Unit
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.ic_google_logo), // 👉 공식 버튼 이미지
-            contentDescription = "Google Login",
+    fun GoogleBrandButton(enabled: Boolean, onClick: () -> Unit) {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
             modifier = Modifier
-                .width(210.dp)        // ⭐ 원하는 크기
-                .height(56.dp)        // 공식 비율 유지
-                .clickable {
-                    val intent = googleClient?.signInIntent
-                    if (intent != null) {
-                        googleLauncher.launch(intent)
-                    } else {
-                        Toast.makeText(context, "GoogleSignIn 초기화 실패", Toast.LENGTH_SHORT).show()
-                    }
-                },
-            contentScale = ContentScale.FillBounds
-        )
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFDADCE0)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = GoogleAuthR.drawable.googleg_standard_color_18),
+                    contentDescription = "Google logo",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("구글 계정으로 로그인", fontWeight = FontWeight.Medium, fontFamily = FontFamily.SansSerif)
+            }
+        }
     }
 
-    // ✅ UI
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val logoSize = maxHeight * 0.30f
 
-            if (nickname != null) {
-                // 로그인 성공 시 프로필 미리보기
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(this@BoxWithConstraints.maxHeight * 0.34f),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                AppTopLogo(
+                    modifier = Modifier.padding(top = 12.dp),
+                    size = logoSize
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            if (showWelcome) {
                 Image(
                     painter = rememberAsyncImagePainter(profileUrl),
                     contentDescription = "profile",
@@ -318,24 +326,25 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                 )
                 Spacer(Modifier.height(8.dp))
                 Text("환영합니다, ${nickname ?: "사용자"}님")
+                Spacer(Modifier.height(24.dp))
             } else {
-                Text("소셜 로그인", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "소셜 로그인",
+                    fontSize = 12.sp,
+                    color = Color(0xFF8A8A88),
+                    fontWeight = FontWeight.Medium
+                )
                 Spacer(Modifier.height(16.dp))
 
-                // ✅ Kakao 로그인 버튼
-                // ✅ Kakao 로그인 버튼
-                LoginButtonKakao(
-                    text = "카카오 로그인",
-                    enabled = activity != null,
+                KakaoBrandButton(
+                    enabled = activity != null && !loading,
                     onClick = { kakaoLogin() }
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-// ✅ Google 로그인 버튼
-                LoginButtonGoogle(
-                    text = "Google로 로그인",
-                    enabled = googleClient != null,
+                GoogleBrandButton(
+                    enabled = googleClient != null && !loading,
                     onClick = {
                         val intent = googleClient?.signInIntent
                         if (intent != null) {
@@ -345,6 +354,12 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                         }
                     }
                 )
+
+                if (loading) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    CircularProgressIndicator()
+                }
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
