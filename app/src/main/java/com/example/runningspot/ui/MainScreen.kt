@@ -169,6 +169,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kakao.vectormap.label.LabelTextBuilder
 import com.kakao.vectormap.label.LabelTextStyle
 import kotlin.math.roundToInt
+import com.example.runningspot.data.remote.PrefetchedLocation
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -278,7 +279,8 @@ fun MainScreen(
     userName: String?,
     userProfile: String?,
     provider: String?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    initialLocation: PrefetchedLocation? = null
 ) {
     val viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var selectedTab by remember { mutableStateOf(2) } // 기본 러닝 탭 선택
@@ -362,6 +364,7 @@ fun MainScreen(
             2 -> RunningScreen(
                 padding = padding,
                 viewModel = viewModel,
+                initialLocation = initialLocation,
                 onRunResult = { distance, duration, pathPairs ->
                     val endAt = System.currentTimeMillis()
                     // 1) 경로 파일 저장
@@ -453,6 +456,7 @@ fun getCircularBitmap(bitmap: Bitmap): Bitmap {
 fun RunningScreen(
     padding: PaddingValues,
     viewModel: RouteViewModel,
+    initialLocation: PrefetchedLocation? = null,
     onRunResult: (Double, Long, List<Pair<Double, Double>>) -> Unit = { _, _, _ -> }
 ) {
     // 주변 루트 리스트 관찰
@@ -611,24 +615,42 @@ fun RunningScreen(
         }
     }
 
-    val readyCb = remember {
+    val readyCb = remember(initialLocation, hasLocationPermission) {
         object : KakaoMapReadyCallback() {
             override fun onMapReady(map: KakaoMap) {
                 Log.d("RUNNINGSPOTDEBUG", "KakaoMap Ready.")
                 kakaoMap = map
 
-                if (hasLocationPermission) {
+                // 1차: MainActivity에서 미리 받아둔 위치를 바로 사용
+                if (initialLocation != null) {
+                    moveCameraTo(map, initialLocation.lat, initialLocation.lng)
+                    updateCurrentLabel(context, map, initialLocation.lat, initialLocation.lng)
+                    viewModel.loadNearbyRoutes(initialLocation.lat, initialLocation.lng)
+
+                    // 2차: 더 정확한 현재 위치로 보정
+                    if (hasLocationPermission) {
+                        getSingleFix(fusedLocationClient) { lat, lng ->
+                            moveCameraTo(map, lat, lng)
+                            updateCurrentLabel(context, map, lat, lng)
+                            viewModel.loadNearbyRoutes(lat, lng)
+                        }
+                    }
+                } else if (hasLocationPermission) {
+                    // 미리 받아둔 위치가 없으면 기존 방식대로 현재 위치
                     getSingleFix(fusedLocationClient) { lat, lng ->
                         moveCameraTo(map, lat, lng)
                         updateCurrentLabel(context, map, lat, lng)
-
-                        // 내 위치를 주변 루트를 달라고 요청
                         viewModel.loadNearbyRoutes(lat, lng)
                     }
                 }
             }
 
-            override fun getPosition(): LatLng = LatLng.from(37.406960, 127.115587)
+            override fun getPosition(): LatLng {
+                return initialLocation?.let {
+                    LatLng.from(it.lat, it.lng)
+                } ?: LatLng.from(37.406960, 127.115587)
+            }
+
             override fun getZoomLevel(): Int = 15
         }
     }
@@ -1023,16 +1045,24 @@ private fun drawRoutePointsOnMap(
     return route
 }
 
-
 @SuppressLint("MissingPermission")
 private fun getSingleFix(
     fused: FusedLocationProviderClient,
     onFix: (Double, Double) -> Unit
 ) {
-    val cts = CancellationTokenSource()
-    fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
-        .addOnSuccessListener { loc ->
-            if (loc != null) onFix(loc.latitude, loc.longitude)
+    fused.lastLocation
+        .addOnSuccessListener { lastLoc ->
+            if (lastLoc != null) {
+                onFix(lastLoc.latitude, lastLoc.longitude)
+            } else {
+                val cts = CancellationTokenSource()
+                fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+                    .addOnSuccessListener { loc ->
+                        if (loc != null) {
+                            onFix(loc.latitude, loc.longitude)
+                        }
+                    }
+            }
         }
 }
 
