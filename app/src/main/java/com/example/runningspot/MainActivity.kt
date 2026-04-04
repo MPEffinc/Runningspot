@@ -2,17 +2,17 @@ package com.example.runningspot
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.runningspot.ui.LoginScreen
 import com.example.runningspot.ui.MainScreen
-import com.google.firebase.auth.FirebaseAuth
-import androidx.activity.SystemBarStyle
-import androidx.activity.enableEdgeToEdge
-import androidx.core.view.WindowInsetsControllerCompat
 import com.example.runningspot.ui.SplashScreen
 import com.example.runningspot.ui.theme.RunningSpotTheme
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 
@@ -21,9 +21,11 @@ private enum class AppEntryState {
     Login,
     Main
 }
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Keep status bar icons readable while using edge-to-edge layouts.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(
                 android.graphics.Color.TRANSPARENT,
@@ -63,16 +65,10 @@ class MainActivity : ComponentActivity() {
                             .await()
 
                         userName = doc.getString("nickname") ?: currentUser.displayName
-                        userProfile =
-                            doc.getString("profileUrl") ?: currentUser.photoUrl?.toString()
+                        userProfile = doc.getString("profileUrl") ?: currentUser.photoUrl?.toString()
                         loginProvider = doc.getString("provider")
                             ?: currentUser.providerData.firstOrNull { it.providerId != "firebase" }?.providerId
-                                ?.let { providerId ->
-                                    if (providerId.contains("google")) "google" else if (providerId.contains(
-                                            "kakao"
-                                        )
-                                    ) "kakao" else providerId
-                                }
+                                ?.let { providerId -> if (providerId.contains("google")) "google" else if (providerId.contains("kakao")) "kakao" else providerId }
                     }.onFailure {
                         userName = currentUser.displayName
                         userProfile = currentUser.photoUrl?.toString()
@@ -113,4 +109,3 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-

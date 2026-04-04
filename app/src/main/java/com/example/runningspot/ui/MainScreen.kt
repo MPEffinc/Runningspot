@@ -1626,7 +1626,16 @@ fun logoutAll(
     provider: String?,
     onLoggedOut: () -> Unit
 ) {
+    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun finishLogout() {
+        mainHandler.post {
+            onLoggedOut()
+        }
+    }
+
     FirebaseAuth.getInstance().signOut()
+
     when (provider?.lowercase()) {
         "google" -> {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -1636,15 +1645,22 @@ fun logoutAll(
 
             GoogleSignIn.getClient(context, gso)
                 .signOut()
-                .addOnCompleteListener { onLoggedOut() }
+                .addOnCompleteListener {
+                    finishLogout()
+                }
         }
+
         "kakao" -> {
-            UserApiClient.instance.logout { _ ->
-                onLoggedOut()
+            UserApiClient.instance.logout { error ->
+                if (error != null) {
+                    Log.e("LOGOUT", "Kakao logout failed", error)
+                }
+                finishLogout()
             }
         }
+
         else -> {
-            onLoggedOut()
+            finishLogout()
         }
     }
 }
