@@ -112,7 +112,6 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 
-
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -163,10 +162,16 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DirectionsRun
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kakao.vectormap.label.LabelTextBuilder
-import com.kakao.vectormap.label.LabelTextStyle
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Watch
+import androidx.compose.runtime.*
+import androidx.compose.ui.text.TextStyle
+import androidx.health.connect.client.HealthConnectClient
+import com.example.runningspot.HealthConnect.HealthConnectManager
+import androidx.health.connect.client.PermissionController
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -2536,6 +2541,33 @@ private fun SettingsScreen(
     padding: PaddingValues,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val healthConnectManager = remember { HealthConnectManager(context) }
+    var isConnected by remember { mutableStateOf(false) }
+
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) { granted ->
+        if (granted.containsAll(healthConnectManager.permissions)) {
+            isConnected = true
+            Toast.makeText(context, "워치 연동이 완료되었습니다!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "일부 권한이 거부되었습니다.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val systemPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        requestPermissionLauncher.launch(healthConnectManager.permissions)
+    }
+    // 화면 진입 시 권한 상태 확인
+    LaunchedEffect(Unit) {
+        if (healthConnectManager.checkAvailability() == HealthConnectClient.SDK_AVAILABLE) {
+            isConnected = healthConnectManager.hasAllPermissions()
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -2554,8 +2586,114 @@ private fun SettingsScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("환경설정 화면입니다.")
-            Text("추후 옵션을 추가할 수 있도록 분리해두었습니다.", color = Color(0xFF2A2A2A))
+            Text(
+                text = "기기 및 데이터 연동",
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+
+            // 3. 워치 연동 카드 UI
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val status = healthConnectManager.checkAvailability()
+                        when (status) {
+                            HealthConnectClient.SDK_UNAVAILABLE -> {
+                                // 플레이스토어 설치 페이지 이동
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data =
+                                        Uri.parse("market://details?id=com.google.android.apps.healthdata")
+                                }
+                                context.startActivity(intent)
+                            }
+
+                            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                Toast.makeText(context, "헬스 커넥트 업데이트가 필요합니다.", Toast.LENGTH_SHORT)
+                                    .show()
+                            }
+
+                            else -> {
+                                coroutineScope.launch {
+                                    if (healthConnectManager.hasAllPermissions()) {
+                                        Toast.makeText(context, "이미 연결된 상태입니다.", Toast.LENGTH_SHORT)
+                                            .show()
+                                        isConnected = true
+                                    } else {
+                                        // 권한 요청 실행
+                                        systemPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.BODY_SENSORS,
+                                                Manifest.permission.ACTIVITY_RECOGNITION)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isConnected) Color(0xFFF0EDFF) else Color(0xFFF8F9FA)
+                ),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 아이콘 섹션 (기존 해결 방식처럼 Icons.Default.Watch가 없으면 Watch 대신 다른 아이트 사용)
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                if (isConnected) Color(0xFF6750A4) else Color(0xFFE9ECEF),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Watch,
+                            contentDescription = null,
+                            tint = if (isConnected) Color.White else Color.Gray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "갤럭시 워치 / 웨어러블 연결",
+                            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        )
+                        Text(
+                            text = if (isConnected) "데이터 동기화 중" else "AI 분석을 위해 운동 데이터를 연결하세요",
+                            style = TextStyle(
+                                fontSize = 13.sp,
+                                color = if (isConnected) Color(0xFF6750A4) else Color.Gray
+                            )
+                        )
+                    }
+
+                    // 연결 상태 표시 아이콘
+                    if (isConnected) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF6750A4)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = Color.LightGray
+                        )
+                    }
+                }
+            }
         }
     }
 }

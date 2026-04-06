@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.runningspot">
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
 
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <application
         android:name=".GlobalApplication"
         android:allowBackup="true"
@@ -41,12 +51,19 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakao761f8d0c71257bbbcebf7f4b89082f9f" android:host="oauth"/>
+                <data android:scheme="kakaoa79a645b5b5c9b0707a7ebe4316ef1ad" android:host="oauth"/>
             </intent-filter>
         </activity>
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
-            android:value="761f8d0c71257bbbcebf7f4b89082f9f" />
+            android:value="a79a645b5b5c9b0707a7ebe4316ef1ad" />
+        <activity
+            android:name=".HealthConnect.PermissionHealth"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.permissions.action.SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>
