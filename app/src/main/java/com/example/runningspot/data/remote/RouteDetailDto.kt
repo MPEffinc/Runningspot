@@ -8,5 +8,5 @@ data class RouteDetailDto(
     @SerializedName(value = "distance_m", alternate = ["distanceM"]) val distance_m: Double,
     @SerializedName(value = "start_lat", alternate = ["startLat"]) val start_lat: Double,
     @SerializedName(value = "start_lng", alternate = ["startLng"]) val start_lng: Double,
-    @SerializedName(value = "points", alternate = ["routePoints", "path", "coordinates"]) val points: List<RoutePointDto> = emptyList()
+    @SerializedName(value = "points", alternate = ["routePoints", "path", "coordinates"]) val points: List<RoutePointDto> = emptyList(),
 )

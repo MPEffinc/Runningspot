@@ -1,10 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.runningspot">
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
 
     <application
         android:name=".GlobalApplication"
@@ -47,6 +58,13 @@
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
             android:value="4a0414c61069e75577764b8ea65c26e9" />
+        <activity
+            android:name=".HealthConnect.PermissionHealth"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.permissions.action.SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

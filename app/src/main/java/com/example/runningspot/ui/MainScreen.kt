@@ -112,6 +112,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
+import android.location.Location.distanceBetween
 import android.media.ExifInterface
 import android.widget.NumberPicker
 import androidx.activity.compose.BackHandler
@@ -170,11 +171,169 @@ import com.kakao.vectormap.label.LabelTextBuilder
 import com.kakao.vectormap.label.LabelTextStyle
 import kotlin.math.roundToInt
 import com.example.runningspot.data.remote.PrefetchedLocation
+import com.google.gson.annotations.SerializedName
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Watch
+import androidx.compose.runtime.*
+import androidx.compose.ui.text.TextStyle
+import androidx.health.connect.client.HealthConnectClient
+import com.example.runningspot.HealthConnect.HealthConnectManager
+import androidx.health.connect.client.PermissionController
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
 private const val RUN_KEY = "runs_json"
 
+private fun distanceMeters(
+    lat1: Double,
+    lng1: Double,
+    lat2: Double,
+    lng2: Double
+): Double {
+    val result = FloatArray(1)
+    android.location.Location.distanceBetween(lat1, lng1, lat2, lng2, result)
+    return result[0].toDouble()
+}
+
+private fun calculateRouteTotalDistance(points: List<com.example.runningspot.data.remote.RoutePointDto>): Double {
+    if (points.size < 2) return 0.0
+
+    val sorted = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+    var sum = 0.0
+
+    for (i in 0 until sorted.lastIndex) {
+        val a = sorted[i]
+        val b = sorted[i + 1]
+        sum += distanceMeters(a.lat, a.lng, b.lat, b.lng)
+    }
+
+    return sum
+}
+@Composable
+private fun FollowRunResultCard(
+    routeName: String,
+    completed: Boolean,
+    distanceM: Double,
+    offRouteCount: Int,
+    paceText: String,
+    completionLabel: String,
+    onClose: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp)
+        ) {
+            Text(
+                text = if (completed) "따라뛰기 완료" else "따라뛰기 종료",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = routeName.ifBlank { "선택한 루트" },
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            RouteInfoRow("완료 여부", completionLabel)
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("뛴 거리", "${"%.2f".format(distanceM / 1000.0)} km")
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("이탈 횟수", "${offRouteCount}회")
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("평균 페이스", paceText)
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Button(
+                onClick = onClose,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("닫기")
+            }
+        }
+    }
+}
+
+private data class FollowRunResultUiState(
+    val routeName: String,
+    val completed: Boolean,
+    val distanceM: Double,
+    val offRouteCount: Int,
+    val paceText: String,
+    val completionLabel: String
+)
+
+private data class RouteProgressResult(
+    val nearestIndex: Int,
+    val completedDistanceM: Double,
+    val remainingDistanceM: Double,
+    val progressPercent: Int,
+    val distanceFromRouteM: Double,
+    val isCompleted: Boolean
+)
+
+private fun calculateProgressByNearestPoint(
+    currentLat: Double,
+    currentLng: Double,
+    points: List<com.example.runningspot.data.remote.RoutePointDto>
+): RouteProgressResult? {
+    if (points.size < 2) return null
+
+    val sorted = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+
+    var nearestIndex = -1
+    var nearestDistance = Double.MAX_VALUE
+
+    sorted.forEachIndexed { index, point ->
+        val d = distanceMeters(currentLat, currentLng, point.lat, point.lng)
+        if (d < nearestDistance) {
+            nearestDistance = d
+            nearestIndex = index
+        }
+    }
+
+    if (nearestIndex == -1) return null
+
+    var completed = 0.0
+    for (i in 0 until nearestIndex) {
+        val a = sorted[i]
+        val b = sorted[i + 1]
+        completed += distanceMeters(a.lat, a.lng, b.lat, b.lng)
+    }
+
+    val total = calculateRouteTotalDistance(sorted)
+    val remaining = (total - completed).coerceAtLeast(0.0)
+    val progress = if (total > 0.0) {
+        ((completed / total) * 100).toInt().coerceIn(0, 100)
+    } else {
+        0
+    }
+
+    val isCompleted = progress >= 98 || nearestIndex >= sorted.lastIndex
+
+    return RouteProgressResult(
+        nearestIndex = nearestIndex,
+        completedDistanceM = completed,
+        remainingDistanceM = remaining,
+        progressPercent = progress,
+        distanceFromRouteM = nearestDistance,
+        isCompleted = isCompleted
+    )
+}
 private data class RunSummaryRef(
     val distanceM: Double,
     val durationMs: Long,
@@ -461,7 +620,6 @@ fun RunningScreen(
 ) {
     // 주변 루트 리스트 관찰
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
-
     val coroutineScope = rememberCoroutineScope() //
 
     val context = LocalContext.current
@@ -476,6 +634,10 @@ fun RunningScreen(
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
     var selectedNearbyRoute by remember { mutableStateOf<RouteLine?>(null) }
+    var selectedRouteDetail by remember {
+        mutableStateOf<com.example.runningspot.data.remote.RouteDetailDto?>(null)
+    }
+    var followRunResult by remember { mutableStateOf<FollowRunResultUiState?>(null) }
     val configuration = LocalConfiguration.current
     val sheetPeekHeight = remember(configuration.screenHeightDp) {
         (configuration.screenHeightDp * 0.25f).dp.coerceIn(170.dp, 260.dp)
@@ -492,6 +654,8 @@ fun RunningScreen(
             var drewRoute = false
             runCatching {
                 val detail = ApiClient.routeApi.getRouteDetail(id)
+                selectedRouteDetail = detail
+
                 kakaoMap?.let { map ->
                     selectedNearbyRoute = drawSelectedRouteOnMap(
                         map = map,
@@ -500,8 +664,22 @@ fun RunningScreen(
                     )
                     drewRoute = selectedNearbyRoute != null
                 }
-            }.onFailure {
+            }.onFailure { e ->
+                android.util.Log.e("RouteDraw", "getRouteDetail or draw failed", e)
+
                 val fallbackPoints = targetRoute?.points.orEmpty()
+
+                targetRoute?.let { route ->
+                    selectedRouteDetail = com.example.runningspot.data.remote.RouteDetailDto(
+                        id = route.id,
+                        title = route.title,
+                        distance_m = route.distance_m,
+                        start_lat = route.start_lat,
+                        start_lng = route.start_lng,
+                        points = fallbackPoints
+                    )
+                }
+
                 kakaoMap?.let { map ->
                     selectedNearbyRoute = drawRoutePointsOnMap(
                         map = map,
@@ -557,6 +735,11 @@ fun RunningScreen(
 
             val dist = data.getDoubleExtra("runningDistance", Double.NaN)
             val time = data.getLongExtra("runningTime", -1L)
+            val followMode = data.getBooleanExtra("followMode", false)
+            val offRouteCount = data.getIntExtra("offRouteCount", 0)
+            val followRouteTitle = data.getStringExtra("followRouteTitle").orEmpty()
+            val followCompleted = data.getBooleanExtra("followCompleted", false)
+            val autoCompleted = data.getBooleanExtra("autoCompleted", false)
             val size = data.getIntExtra("pathSize", 0)
             val pathPairs = if (size > 1) {
                 (0 until size).map { i ->
@@ -566,6 +749,17 @@ fun RunningScreen(
 
             if (!dist.isNaN() && time >= 0) {
                 onRunResult(dist, time, pathPairs)
+                if (followMode) {
+                    val paceText = calcPace(dist, time)?.let(::formatPace) ?: "-"
+                    followRunResult = FollowRunResultUiState(
+                        routeName = followRouteTitle,
+                        completed = followCompleted,
+                        distanceM = dist,
+                        offRouteCount = offRouteCount,
+                        paceText = paceText,
+                        completionLabel = if (autoCompleted) "완료" else "중도 종료"
+                    )
+                }
             }
 
             if (size > 1) {
@@ -586,6 +780,7 @@ fun RunningScreen(
             }
         }
     }
+
 
     LaunchedEffect(Unit) {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -735,11 +930,30 @@ fun RunningScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Box(modifier = Modifier.weight(1f)) {
-                    NearbyRoutesSection(
-                        viewModel = viewModel,
-                        autoLoadNearbyOnStart = false,
-                        onRouteClick = onSelectNearbyRoute
-                    )
+                    if (selectedRouteDetail != null) {
+                        SelectedRoutePreviewCard(
+                            route = selectedRouteDetail!!,
+                            onBackToList = {
+                                selectedRouteDetail = null
+                            },
+                            onStartFollowRun = {
+                                selectedRouteDetail?.let { detail ->
+                                    val intent = Intent(context, RunningActivity::class.java).apply {
+                                        putExtra("run_mode", "follow")
+                                        putExtra("follow_route_id", detail.id)
+                                        putExtra("follow_route_title", detail.title)
+                                    }
+                                    context.startActivity(intent)
+                                }
+                            }
+                        )
+                    } else {
+                        NearbyRoutesSection(
+                            viewModel = viewModel,
+                            autoLoadNearbyOnStart = false,
+                            onRouteClick = onSelectNearbyRoute
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -813,10 +1027,129 @@ fun RunningScreen(
                     Text("러닝 시작", fontWeight = FontWeight.Bold)
                 }
             }
+            followRunResult?.let { result ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.32f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { followRunResult = null }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 24.dp)
+                    ) {
+                        FollowRunResultCard(
+                            routeName = result.routeName,
+                            completed = result.completed,
+                            distanceM = result.distanceM,
+                            offRouteCount = result.offRouteCount,
+                            paceText = result.paceText,
+                            completionLabel = result.completionLabel,
+                            onClose = { followRunResult = null }
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+@Composable
+private fun FollowRunningCard(
+    route: com.example.runningspot.data.remote.RouteDetailDto,
+    progressPercent: Int,
+    completedDistanceM: Double,
+    remainingDistanceM: Double,
+    isOffRoute: Boolean,
+    offRouteCount: Int,
+    onStop: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = "따라뛰기 진행 중",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = route.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = "루트 진행률 $progressPercent%",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                LinearProgressIndicator(
+                    progress = { progressPercent / 100f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                RouteInfoRow(
+                    label = "완료 거리",
+                    value = "${"%.2f".format(completedDistanceM / 1000.0)} km"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "남은 거리",
+                    value = "${"%.2f".format(remainingDistanceM / 1000.0)} km"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "이탈 상태",
+                    value = if (isOffRoute) "경로 이탈" else "경로 유지 중"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "이탈 횟수",
+                    value = "${offRouteCount}회"
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedButton(
+                    onClick = onStop,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("따라뛰기 종료")
+                }
+            }
+        }
+    }
+}
 private fun showNicknameMarkers(
     kakaoMap: KakaoMap,
     routes: List<com.example.runningspot.data.remote.NearbyRouteDto>,
@@ -1002,23 +1335,51 @@ private fun drawSelectedRouteOnMap(
     detail: com.example.runningspot.data.remote.RouteDetailDto,
     previousRoute: RouteLine?
 ): RouteLine? {
-    val routePath = detail.points
+    val cleanedPoints = detail.points
         .sortedBy { it.seq }
-        .map { LatLng.from(it.lat, it.lng) }
-    if (routePath.size < 2) return null
+        .distinctBy { "${it.lat},${it.lng}" }   // 중복 좌표 제거
 
-    val manager = map.routeLineManager ?: return null
+    android.util.Log.d("RouteDraw", "detail.points size=${detail.points.size}, cleaned=${cleanedPoints.size}")
+
+    val routePath = cleanedPoints.map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) {
+        android.util.Log.e("RouteDraw", "routePath size < 2")
+        return null
+    }
+
+    val manager = map.routeLineManager
+    if (manager == null) {
+        android.util.Log.e("RouteDraw", "routeLineManager is null")
+        return null
+    }
+
     val layer = manager.layer
-    previousRoute?.let { layer.remove(it) }
 
-    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
-    route.show()
+    return try {
+        previousRoute?.let { layer.remove(it) }
 
-    val avgLat = routePath.map { it.latitude }.average()
-    val avgLng = routePath.map { it.longitude }.average()
-    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+        val style = RouteLineStyle.from(10f, android.graphics.Color.BLUE)
+        val styles = RouteLineStyles.from(style)
+        val segment = RouteLineSegment.from(routePath).setStyles(styles)
+        val options = RouteLineOptions.from(segment)
 
-    return route
+        val route = layer.addRouteLine(options)
+        route.show()
+
+        val avgLat = routePath.map { it.latitude }.average()
+        val avgLng = routePath.map { it.longitude }.average()
+        map.moveCamera(
+            CameraUpdateFactory.newCenterPosition(
+                LatLng.from(avgLat, avgLng)
+            )
+        )
+
+        android.util.Log.d("RouteDraw", "route draw success")
+        route
+    } catch (e: Exception) {
+        android.util.Log.e("RouteDraw", "drawSelectedRouteOnMap failed", e)
+        null
+    }
 }
 
 private fun drawRoutePointsOnMap(
@@ -1026,23 +1387,51 @@ private fun drawRoutePointsOnMap(
     points: List<com.example.runningspot.data.remote.RoutePointDto>,
     previousRoute: RouteLine?
 ): RouteLine? {
-    val routePath = points
+    val cleanedPoints = points
         .sortedBy { it.seq }
-        .map { LatLng.from(it.lat, it.lng) }
-    if (routePath.size < 2) return null
+        .distinctBy { "${it.lat},${it.lng}" }
 
-    val manager = map.routeLineManager ?: return null
+    android.util.Log.d("RouteDraw", "fallback points size=${points.size}, cleaned=${cleanedPoints.size}")
+
+    val routePath = cleanedPoints.map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) {
+        android.util.Log.e("RouteDraw", "fallback routePath size < 2")
+        return null
+    }
+
+    val manager = map.routeLineManager
+    if (manager == null) {
+        android.util.Log.e("RouteDraw", "fallback routeLineManager is null")
+        return null
+    }
+
     val layer = manager.layer
-    previousRoute?.let { layer.remove(it) }
 
-    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
-    route.show()
+    return try {
+        previousRoute?.let { layer.remove(it) }
 
-    val avgLat = routePath.map { it.latitude }.average()
-    val avgLng = routePath.map { it.longitude }.average()
-    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+        val style = RouteLineStyle.from(10f, android.graphics.Color.BLUE)
+        val styles = RouteLineStyles.from(style)
+        val segment = RouteLineSegment.from(routePath).setStyles(styles)
+        val options = RouteLineOptions.from(segment)
 
-    return route
+        val route = layer.addRouteLine(options)
+        route.show()
+
+        val avgLat = routePath.map { it.latitude }.average()
+        val avgLng = routePath.map { it.longitude }.average()
+        map.moveCamera(
+            CameraUpdateFactory.newCenterPosition(
+                LatLng.from(avgLat, avgLng)
+            )
+        )
+
+        android.util.Log.d("RouteDraw", "fallback route draw success")
+        route
+    } catch (e: Exception) {
+        android.util.Log.e("RouteDraw", "drawRoutePointsOnMap failed", e)
+        null
+    }
 }
 
 @SuppressLint("MissingPermission")
@@ -2006,8 +2395,8 @@ fun MyPageScreen(
                                     },
                                     title = "로그아웃",
                                     onClick = {
-                                            showMenu = false
-                                            logoutAll(context, provider) { onLogout() }
+                                        showMenu = false
+                                        logoutAll(context, provider) { onLogout() }
                                     }
                                 )
 
@@ -2582,6 +2971,33 @@ private fun SettingsScreen(
     padding: PaddingValues,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val healthConnectManager = remember { HealthConnectManager(context) }
+    var isConnected by remember { mutableStateOf(false) }
+
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) { granted ->
+        if (granted.containsAll(healthConnectManager.permissions)) {
+            isConnected = true
+            Toast.makeText(context, "워치 연동이 완료되었습니다!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "일부 권한이 거부되었습니다.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val systemPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        requestPermissionLauncher.launch(healthConnectManager.permissions)
+    }
+    // 화면 진입 시 권한 상태 확인
+    LaunchedEffect(Unit) {
+        if (healthConnectManager.checkAvailability() == HealthConnectClient.SDK_AVAILABLE) {
+            isConnected = healthConnectManager.hasAllPermissions()
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -2600,8 +3016,114 @@ private fun SettingsScreen(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("환경설정 화면입니다.")
-            Text("추후 옵션을 추가할 수 있도록 분리해두었습니다.", color = Color(0xFF2A2A2A))
+            Text(
+                text = "기기 및 데이터 연동",
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+
+            // 3. 워치 연동 카드 UI
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val status = healthConnectManager.checkAvailability()
+                        when (status) {
+                            HealthConnectClient.SDK_UNAVAILABLE -> {
+                                // 플레이스토어 설치 페이지 이동
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data =
+                                        Uri.parse("market://details?id=com.google.android.apps.healthdata")
+                                }
+                                context.startActivity(intent)
+                            }
+
+                            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                Toast.makeText(context, "헬스 커넥트 업데이트가 필요합니다.", Toast.LENGTH_SHORT)
+                                    .show()
+                            }
+
+                            else -> {
+                                coroutineScope.launch {
+                                    if (healthConnectManager.hasAllPermissions()) {
+                                        Toast.makeText(context, "이미 연결된 상태입니다.", Toast.LENGTH_SHORT)
+                                            .show()
+                                        isConnected = true
+                                    } else {
+                                        // 권한 요청 실행
+                                        systemPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.BODY_SENSORS,
+                                                Manifest.permission.ACTIVITY_RECOGNITION)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isConnected) Color(0xFFF0EDFF) else Color(0xFFF8F9FA)
+                ),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 아이콘 섹션 (기존 해결 방식처럼 Icons.Default.Watch가 없으면 Watch 대신 다른 아이트 사용)
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                if (isConnected) Color(0xFF6750A4) else Color(0xFFE9ECEF),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Watch,
+                            contentDescription = null,
+                            tint = if (isConnected) Color.White else Color.Gray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "갤럭시 워치 / 웨어러블 연결",
+                            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        )
+                        Text(
+                            text = if (isConnected) "데이터 동기화 중" else "AI 분석을 위해 운동 데이터를 연결하세요",
+                            style = TextStyle(
+                                fontSize = 13.sp,
+                                color = if (isConnected) Color(0xFF6750A4) else Color.Gray
+                            )
+                        )
+                    }
+
+                    // 연결 상태 표시 아이콘
+                    if (isConnected) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF6750A4)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = Color.LightGray
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -3473,5 +3995,90 @@ private fun SummaryCardTile(
             Spacer(Modifier.height(6.dp))
             Text(value, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1A1A1A))
         }
+    }
+}
+@Composable
+private fun SelectedRoutePreviewCard(
+    route: com.example.runningspot.data.remote.RouteDetailDto,
+    onBackToList: () -> Unit,
+    onStartFollowRun: () -> Unit
+) {
+    val distanceKm = route.distance_m / 1000.0
+    val estimatedMinutes = ((route.distance_m / 1000.0) * 6.5).toInt().coerceAtLeast(1)
+    val startText = "${"%.5f".format(route.start_lat)}, ${"%.5f".format(route.start_lng)}"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+    ) {
+        TextButton(
+            onClick = onBackToList,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)
+        ) {
+            Text("← 목록으로")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = route.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                RouteInfoRow(label = "총 거리", value = "${"%.2f".format(distanceKm)} km")
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(label = "예상 시간", value = "약 ${estimatedMinutes}분")
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(label = "시작 위치", value = startText)
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = onStartFollowRun,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("이 루트 따라뛰기")
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun RouteInfoRow(
+    label: String,
+    value: String
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium
+        )
     }
 }

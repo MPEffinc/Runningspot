@@ -13,10 +13,11 @@ configurations.all {
 android {
     namespace = "com.example.runningspot"
     compileSdk = 36
+    compileSdkExtension = 19
 
     defaultConfig {
         applicationId = "com.example.runningspot"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -98,6 +99,7 @@ dependencies {
     implementation("com.kakao.maps.open:android:2.12.18")
 
     implementation ("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("com.google.android.gms:play-services-base:18.6.0")
     implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-storage")
@@ -106,5 +108,5 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.google.android.gms:play-services-auth:20.7.0")
+    implementation("androidx.health.connect:connect-client:1.2.0-alpha03")
 }
