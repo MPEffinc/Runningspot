@@ -22,10 +22,10 @@ suspend fun fetchMyRoutes(baseUrl: String): List<RouteSummary> = withContext(Dis
     val token = user.getIdToken(false).await().token
         ?: throw IllegalStateException("ID Token 없음")
 
-    Log.d("ROUTE_API", "GET $baseUrl/routes/nearby")
+    Log.d("ROUTE_API", "GET $baseUrl/routes/mine")
 
     val req = Request.Builder()
-        .url("$baseUrl/routes/nearby")
+        .url("$baseUrl/routes/mine")
         .addHeader("Authorization", "Bearer $token")
         .get()
         .build()
