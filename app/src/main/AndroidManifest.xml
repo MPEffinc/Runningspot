@@ -17,6 +17,10 @@
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:name=".GlobalApplication"
         android:allowBackup="true"
@@ -55,6 +59,20 @@
                 <data android:scheme="kakao4a0414c61069e75577764b8ea65c26e9" android:host="oauth"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".RunningIndicatorService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+        <receiver
+            android:name=".RunningIndicatorActionReceiver"
+            android:exported="false" />
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
             android:value="4a0414c61069e75577764b8ea65c26e9" />

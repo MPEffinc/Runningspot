@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -84,7 +83,6 @@ import com.example.runningspot.R
 import com.example.runningspot.RunningActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -112,17 +110,14 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
-import android.location.Location.distanceBetween
 import android.media.ExifInterface
 import android.widget.NumberPicker
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
@@ -133,15 +128,13 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.kakao.sdk.user.UserApiClient
-import com.example.runningspot.data.CrewRepository
+import com.example.runningspot.data.repository.CrewRepository
 import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
-import com.android.tools.build.jetifier.core.utils.Log.e
 import com.example.runningspot.data.remote.ApiClient
-import com.example.runningspot.data.remote.NearbyRouteDto
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -153,7 +146,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import com.example.runningspot.ui.theme.DialogContainer
 import com.example.runningspot.ui.theme.DialogText
@@ -164,24 +156,19 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DirectionsRun
-import androidx.compose.material3.RadioButtonDefaults.colors
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kakao.vectormap.label.LabelTextBuilder
-import com.kakao.vectormap.label.LabelTextStyle
 import kotlin.math.roundToInt
 import com.example.runningspot.data.remote.PrefetchedLocation
-import com.google.gson.annotations.SerializedName
 
-import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Watch
-import androidx.compose.runtime.*
 import androidx.compose.ui.text.TextStyle
 import androidx.health.connect.client.HealthConnectClient
 import com.example.runningspot.HealthConnect.HealthConnectManager
 import androidx.health.connect.client.PermissionController
+import com.example.runningspot.data.repository.CommunityPostRepository
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -1561,7 +1548,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
-    val repo = remember { com.example.runningspot.data.CommunityPostRepository() }
+    val repo = remember { CommunityPostRepository() }
     val scope = rememberCoroutineScope()
 
 

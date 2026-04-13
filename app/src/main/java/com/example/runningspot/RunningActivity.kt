@@ -2,6 +2,7 @@ package com.example.runningspot
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -45,6 +46,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import android.telecom.VideoProfile.isPaused
 import android.view.Gravity
 import android.view.View
@@ -63,6 +65,7 @@ import android.widget.LinearLayout
 import androidx.compose.ui.graphics.toArgb
 import com.example.runningspot.ui.theme.AppWhite
 import com.example.runningspot.ui.theme.BrandBlue
+import kotlin.jvm.java
 
 
 class RunningActivity : ComponentActivity() {
@@ -142,6 +145,8 @@ class RunningActivity : ComponentActivity() {
     private var wasOffRoute = false
     private var maxGuideProgressDistanceM = 0.0
     private var hasFinishTriggered = false
+
+    private lateinit var pauseBtn: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -335,7 +340,7 @@ class RunningActivity : ComponentActivity() {
             }
         }
         // 하단 왼쪽 “일시정지/재개” 버튼
-        val pauseBtn = com.google.android.material.button.MaterialButton(this).apply {
+        pauseBtn = MaterialButton(this).apply {
             text = "일시정지"
 
             setBackgroundColor(Color.parseColor("#6E7075"))
@@ -449,6 +454,7 @@ class RunningActivity : ComponentActivity() {
             override fun getPosition(): LatLng = LatLng.from(37.56, 126.97)
             override fun getZoomLevel(): Int = 15
         })
+        handleIndicatorAction(intent.getStringExtra("indicator_action"))
     }
     private fun simplifyRoutePoints(
         points: List<LatLng>,
@@ -756,18 +762,27 @@ class RunningActivity : ComponentActivity() {
         elapsedTime = durationMs / 1000
         val minutes = elapsedTime / 60
         val seconds = elapsedTime % 60
-        txtTime.text = "%02d:%02d".format(minutes, seconds)
-        txtDistance.text = "%.1f km".format(totalDistance / 1000.0)
+        val timeText = "%02d:%02d".format(minutes, seconds)
+        txtTime.text = timeText
+
+        val distanceText = "%.1f km".format(totalDistance / 1000.0)
+        txtDistance.text = distanceText
         val paceSecondsPerKm = calcPace(totalDistance, durationMs)
-        if (paceSecondsPerKm != null) {
+        val paceText = if (paceSecondsPerKm != null) {
             val paceMin = (paceSecondsPerKm / 60).toInt()
             val paceSec = (paceSecondsPerKm % 60).toInt()
-            txtPace.text = "%d'%02d\"".format(paceMin, paceSec)
+            "%d'%02d\"".format(paceMin, paceSec)
         } else {
-            txtPace.text = "-'--\"" // 데이터 부족
+            "-'--\""
         }
+        txtPace.text = paceText
         val calories = calcCalories(totalDistance)
         txtCalories.text = "%.0f kcal".format(calories)
+        updateRunningIndicator(
+            timeText = timeText,
+            distanceText = distanceText,
+            paceText = paceText
+        )
     }
 
     // ✅ 러닝 시작 (지도 로드 완료 후 실행)
@@ -797,6 +812,7 @@ class RunningActivity : ComponentActivity() {
         accumulatedPauseMs = 0L
         isRunning = true
         isPaused = false
+        startRunningIndicator()
 
         fused.lastLocation.addOnSuccessListener { loc ->
             kakaoMap?.let { map ->
@@ -895,7 +911,11 @@ class RunningActivity : ComponentActivity() {
     // 수명주기
     override fun onResume() { super.onResume(); mapView.resume() }
     override fun onPause()  { super.onPause();  mapView.pause() }
-    override fun onDestroy(){ super.onDestroy(); mapView.finish() }
+    override fun onDestroy() {
+        stopRunningIndicator()
+        mapView.finish()
+        super.onDestroy()
+    }
 
     // 권한 결과
     override fun onRequestPermissionsResult(
@@ -1232,5 +1252,61 @@ class RunningActivity : ComponentActivity() {
             else -> R.drawable.go
         }
         navIcon.setImageResource(resId)
+    }
+    private fun startRunningIndicator() {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_START
+            putExtra(RunningIndicatorService.EXTRA_TIME, "00:00")
+            putExtra(RunningIndicatorService.EXTRA_DISTANCE_KM, "0.0 km")
+            putExtra(RunningIndicatorService.EXTRA_PACE, "-'--\"")
+            putExtra(RunningIndicatorService.EXTRA_IS_PAUSED, false)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun updateRunningIndicator(timeText: String, distanceText: String, paceText: String) {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_UPDATE
+            putExtra(RunningIndicatorService.EXTRA_TIME, timeText)
+            putExtra(RunningIndicatorService.EXTRA_DISTANCE_KM, distanceText)
+            putExtra(RunningIndicatorService.EXTRA_PACE, paceText)
+            putExtra(RunningIndicatorService.EXTRA_IS_PAUSED, isPaused)
+        }
+        startService(intent)
+    }
+
+    private fun stopRunningIndicator() {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_STOP
+        }
+        startService(intent)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.cancel(RunningIndicatorService.NOTIFICATION_ID)
+    }
+
+    private fun handleIndicatorAction(action: String?) {
+        when (action) {
+            RunningIndicatorActionReceiver.ACTION_PAUSE_RESUME -> {
+                if (::pauseBtn.isInitialized) {
+                    togglePause(pauseBtn)
+                }
+            }
+
+            RunningIndicatorActionReceiver.ACTION_STOP -> {
+                stopRunningAndFinish()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIndicatorAction(intent.getStringExtra("indicator_action"))
     }
 }

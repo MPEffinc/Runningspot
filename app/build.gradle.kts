@@ -109,4 +109,8 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("androidx.health.connect:connect-client:1.2.0-alpha03")
+
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.media:media:1.6.0")
 }

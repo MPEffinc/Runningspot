@@ -54,10 +54,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import com.example.runningspot.ui.CrewChatScreen
-import com.example.runningspot.data.CrewRepository
+import com.example.runningspot.data.repository.CrewRepository
 import com.google.firebase.storage.FirebaseStorage
 import java.util.UUID
-import com.example.runningspot.data.repository.fetchRouteDetail
 import com.example.runningspot.data.remote.RouteSummary
 import com.example.runningspot.data.repository.fetchMyRoutes
 import com.example.runningspot.ui.RouteMapByRouteDetail
@@ -78,6 +77,8 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.example.runningspot.data.repository.Comment
+import com.example.runningspot.data.repository.CommunityPostRepository
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -697,13 +698,13 @@ fun CommunityDetailScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { com.example.runningspot.data.CommunityPostRepository() }
+    val repo = remember { CommunityPostRepository() }
     val myUid = FirebaseAuth.getInstance().currentUser?.uid
     var likes by rememberSaveable { mutableStateOf(0) }
     var liked by rememberSaveable { mutableStateOf(false) }
     var postAuthorId by remember { mutableStateOf<String?>(null) }
     var comments by remember {
-        mutableStateOf<List<Pair<String, com.example.runningspot.data.Comment>>>(
+        mutableStateOf<List<Pair<String, Comment>>>(
             emptyList()
         )
     }

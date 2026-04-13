@@ -44,6 +44,7 @@ import com.example.runningspot.data.remote.ApiClient
 import com.example.runningspot.data.remote.KakaoAuthRequest
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -117,6 +118,19 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 .collection("users")
                                 .document(firebaseUser.uid)
                                 .set(userData, SetOptions.merge())
+                                .await()
+                            val fcmToken = FirebaseMessaging.getInstance().token.await()
+                            FirebaseFirestore.getInstance()
+                                .collection("users")
+                                .document(firebaseUser.uid)
+                                .set(
+                                    mapOf(
+                                        "fcmTokens" to FieldValue.arrayUnion(fcmToken),
+                                        "lastFcmToken" to fcmToken,
+                                        "fcmUpdatedAt" to FieldValue.serverTimestamp()
+                                    ),
+                                    SetOptions.merge()
+                                )
                                 .await()
                         } catch (e: Exception) {
                             Log.w("GOOGLE", "users 문서 저장 실패", e)
@@ -194,6 +208,19 @@ fun LoginScreen(onLoginSuccess: (name: String?, profileUrl: String?, provider: S
                                 .collection("users")
                                 .document(firebaseUser.uid)
                                 .set(userData, SetOptions.merge())
+                                .await()
+                            val fcmToken = FirebaseMessaging.getInstance().token.await()
+                            FirebaseFirestore.getInstance()
+                                .collection("users")
+                                .document(firebaseUser.uid)
+                                .set(
+                                    mapOf(
+                                        "fcmTokens" to FieldValue.arrayUnion(fcmToken),
+                                        "lastFcmToken" to fcmToken,
+                                        "fcmUpdatedAt" to FieldValue.serverTimestamp()
+                                    ),
+                                    SetOptions.merge()
+                                )
                                 .await()
 
                             val idToken = FirebaseAuth.getInstance()

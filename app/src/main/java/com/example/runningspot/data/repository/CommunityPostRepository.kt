@@ -1,7 +1,7 @@
-package com.example.runningspot.data
+package com.example.runningspot.data.repository
 
 import android.net.Uri
-import com.example.runningspot.data.repository.CommunityPost
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
@@ -14,7 +14,7 @@ data class Comment(
         val userId: String = "",
         val userName: String = "",
         val text: String = "",
-        val createdAt: com.google.firebase.Timestamp? = null
+        val createdAt: Timestamp? = null
     )
 class CommunityPostRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
@@ -174,7 +174,7 @@ class CommunityPostRepository(
     }
     suspend fun fetchAllPosts(): List<Pair<String, CommunityPost>> {
         val snapshot = db.collection("posts")
-            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
             .get()
             .await()
 
