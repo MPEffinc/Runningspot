@@ -80,7 +80,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.CommunityActivity
 import com.example.runningspot.R
-import com.example.runningspot.RunningActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
@@ -135,6 +134,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.data.remote.RunHistoryDto
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -168,7 +168,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.health.connect.client.HealthConnectClient
 import com.example.runningspot.HealthConnect.HealthConnectManager
 import androidx.health.connect.client.PermissionController
+import com.example.runningspot.RunningActivity
 import com.example.runningspot.data.repository.CommunityPostRepository
+import com.example.runningspot.data.repository.RunRepository
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -325,8 +327,25 @@ private data class RunSummaryRef(
     val distanceM: Double,
     val durationMs: Long,
     val endAt: Long,
-    val fileName: String // 내부 저장소에 저장된 경로 파일명
+    val fileName: String = "",
+    val pathPairs: List<Pair<Double, Double>> = emptyList(),
+    val id: Long? = null
 )
+
+private fun RunHistoryDto.toSummaryRef(): RunSummaryRef {
+    val sortedPoints = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+    return RunSummaryRef(
+        id = id,
+        distanceM = distance_m,
+        durationMs = duration_ms,
+        endAt = ended_at,
+        pathPairs = sortedPoints.map { it.lat to it.lng }
+    )
+}
+
+private suspend fun fetchRunSummaryRefs(repository: RunRepository): List<RunSummaryRef> {
+    return repository.getMyRuns().map { it.toSummaryRef() }
+}
 
 private enum class MyPageSubScreen {
     Main,
@@ -432,6 +451,8 @@ fun MainScreen(
     var selectedTab by remember { mutableStateOf(2) } // 기본 러닝 탭 선택
 
     val context = LocalContext.current
+    val runRepository = remember { RunRepository() }
+    val screenScope = rememberCoroutineScope()
 
 // 기록/통계 상태
     var showHistory by rememberSaveable { mutableStateOf(false) }
@@ -440,16 +461,24 @@ fun MainScreen(
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
     var myPageSubScreen by rememberSaveable { mutableStateOf(MyPageSubScreen.Main) }
+    var isRunHistoryLoading by remember { mutableStateOf(false) }
 
-// 앱 시작 시 저장된 기록 읽어오기
+// 앱 시작 시 서버에 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
-        runRefs.clear()
-        runRefs.addAll(loadRunSummaryRefs(context))
-        runRefs.firstOrNull()?.let { r ->
-            lastDistance = r.distanceM
-            lastDuration = r.durationMs
-            lastPath = loadRunPathFile(context, r.fileName)
+        isRunHistoryLoading = true
+        try {
+            val serverRuns = fetchRunSummaryRefs(runRepository)
+            runRefs.clear()
+            runRefs.addAll(serverRuns)
+            runRefs.firstOrNull()?.let { r ->
+                lastDistance = r.distanceM
+                lastDuration = r.durationMs
+                lastPath = r.pathPairs
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "러닝 기록을 불러오지 못했어요: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+        isRunHistoryLoading = false
     }
 
 
@@ -466,30 +495,42 @@ fun MainScreen(
                     HistoryList(
                         padding = padding,
                         runs = runRefs,
+                        isLoading = isRunHistoryLoading,
                         userName = userName,
                         onBack = { showHistory = false },
                         onSelect = { r ->
                             lastDistance = r.distanceM
                             lastDuration = r.durationMs
-                            lastPath = loadRunPathFile(context, r.fileName)
+                            lastPath = r.pathPairs
                             showHistory = false
                         },
                         onDelete = { r ->
-                            // 1) 저장소에서 삭제
-                            deleteRunSummaryRef(context, r)
-                            // 2) 메모리 목록에서 삭제
-                            runRefs.remove(r)
+                            screenScope.launch {
+                                val runId = r.id
+                                if (runId == null) {
+                                    Toast.makeText(context, "서버 기록 id가 없어 삭제할 수 없어요.", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
 
-                            // 3) 통계 화면에 보여줄 마지막 기록 갱신
-                            if (runRefs.isNotEmpty()) {
-                                val first = runRefs.first()
-                                lastDistance = first.distanceM
-                                lastDuration = first.durationMs
-                                lastPath = loadRunPathFile(context, first.fileName)
-                            } else {
-                                lastDistance = null
-                                lastDuration = null
-                                lastPath = emptyList()
+                                try {
+                                    runRepository.deleteRun(runId)
+                                    val refreshed = fetchRunSummaryRefs(runRepository)
+                                    runRefs.clear()
+                                    runRefs.addAll(refreshed)
+
+                                    if (runRefs.isNotEmpty()) {
+                                        val first = runRefs.first()
+                                        lastDistance = first.distanceM
+                                        lastDuration = first.durationMs
+                                        lastPath = first.pathPairs
+                                    } else {
+                                        lastDistance = null
+                                        lastDuration = null
+                                        lastPath = emptyList()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     )
@@ -513,17 +554,44 @@ fun MainScreen(
                 initialLocation = initialLocation,
                 onRunResult = { distance, duration, pathPairs ->
                     val endAt = System.currentTimeMillis()
-                    // 1) 경로 파일 저장
-                    val fileName = saveRunPathFile(context, endAt, pathPairs)
-                    // 2) 요약 저장(SharedPreferences)
-                    val ref = RunSummaryRef(distance, duration, endAt, fileName)
-                    saveRunSummaryRef(context, ref)
+                    screenScope.launch {
+                        if (pathPairs.size < 2) {
+                            Toast.makeText(context, "경로가 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
 
-                    // 3) 메모리 목록/프리뷰 갱신
-                    runRefs.add(0, ref)
-                    lastDistance = distance
-                    lastDuration = duration
-                    lastPath = pathPairs
+                        try {
+                            val saveDistance = if (distance > 0.0) {
+                                distance
+                            } else {
+                                pathPairs.zipWithNext().sumOf { (a, b) ->
+                                    distanceMeters(a.first, a.second, b.first, b.second)
+                                }
+                            }
+
+                            if (saveDistance <= 0.0) {
+                                Toast.makeText(context, "거리가 너무 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+
+                            runRepository.createRun(
+                                distanceM = saveDistance,
+                                durationMs = duration,
+                                endedAt = endAt,
+                                pathPairs = pathPairs
+                            )
+                            val refreshed = fetchRunSummaryRefs(runRepository)
+                            runRefs.clear()
+                            runRefs.addAll(refreshed)
+
+                            val latest = runRefs.firstOrNull()
+                            lastDistance = latest?.distanceM ?: saveDistance
+                            lastDuration = latest?.durationMs ?: duration
+                            lastPath = latest?.pathPairs ?: pathPairs
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "러닝 기록 저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             )
             3 -> CommunityScreen(padding, userName)
@@ -728,28 +796,30 @@ fun RunningScreen(
             val followCompleted = data.getBooleanExtra("followCompleted", false)
             val autoCompleted = data.getBooleanExtra("autoCompleted", false)
             val size = data.getIntExtra("pathSize", 0)
+            val safeDist = if (dist.isNaN()) 0.0 else dist
             val pathPairs = if (size > 1) {
                 (0 until size).map { i ->
                     data.getDoubleExtra("lat_$i", 0.0) to data.getDoubleExtra("lng_$i", 0.0)
                 }
             } else emptyList()
 
-            if (!dist.isNaN() && time >= 0) {
-                onRunResult(dist, time, pathPairs)
-                if (followMode) {
-                    val paceText = calcPace(dist, time)?.let(::formatPace) ?: "-"
-                    followRunResult = FollowRunResultUiState(
-                        routeName = followRouteTitle,
-                        completed = followCompleted,
-                        distanceM = dist,
-                        offRouteCount = offRouteCount,
-                        paceText = paceText,
-                        completionLabel = if (autoCompleted) "완료" else "중도 종료"
-                    )
-                }
+            if (followMode && time >= 0) {
+                val paceText = calcPace(safeDist, time)?.let(::formatPace) ?: "-"
+                followRunResult = FollowRunResultUiState(
+                    routeName = followRouteTitle,
+                    completed = followCompleted,
+                    distanceM = safeDist,
+                    offRouteCount = offRouteCount,
+                    paceText = paceText,
+                    completionLabel = if (autoCompleted) "완료" else "중도 종료"
+                )
             }
 
-            if (size > 1) {
+            if (!dist.isNaN() && time >= 0) {
+                onRunResult(dist, time, pathPairs)
+            }
+
+            if (size > 1 && !followMode) {
                 val path = (0 until size).map { i ->
                     LatLng.from(
                         data.getDoubleExtra("lat_$i", 0.0),
@@ -3435,6 +3505,7 @@ fun calcCalories(distanceM: Double, weightKg: Double = 70.0): Double {
 private fun HistoryList(
     padding: PaddingValues,
     runs: List<RunSummaryRef>,
+    isLoading: Boolean = false,
     userName: String?,
     onBack: () -> Unit = {},
     onSelect: (RunSummaryRef) -> Unit = {},
@@ -3514,7 +3585,14 @@ private fun HistoryList(
             }
         }
 
-        if (runs.isEmpty()) {
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (runs.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -3619,8 +3697,8 @@ private fun HistoryList(
                     if (isUploading) return@Button
                     val target = uploadTarget ?: return@Button
 
-                    // 1) 로컬 파일에서 경로 읽기
-                    val pairs = loadRunPathFile(context, target.fileName)
+                    // 1) 서버에서 가져온 기록 경로 사용
+                    val pairs = target.pathPairs
                     if (pairs.size < 2) {
                         Toast.makeText(context, "경로가 없어서 업로드할 수 없어요.", Toast.LENGTH_SHORT).show()
                         return@Button

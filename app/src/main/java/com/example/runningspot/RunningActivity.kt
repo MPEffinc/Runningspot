@@ -43,7 +43,9 @@ import kotlin.math.sqrt
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
@@ -70,6 +72,8 @@ import kotlin.jvm.java
 
 class RunningActivity : ComponentActivity() {
     private var expectedRouteMarker: com.kakao.vectormap.label.Label? = null
+    private var userLocationMarker: com.kakao.vectormap.label.Label? = null
+    private val offRouteMarkers = mutableListOf<com.kakao.vectormap.label.Label>()
     private lateinit var navIcon: android.widget.ImageView
 
     private lateinit var txtNavInstruction: TextView
@@ -156,6 +160,7 @@ class RunningActivity : ComponentActivity() {
         mapView = MapView(this)
         followMode = (intent.getStringExtra("run_mode") == "follow")
         followRouteId = intent.getLongExtra("follow_route_id", -1L)
+        followRouteTitle = intent.getStringExtra("follow_route_title").orEmpty()
         navBanner = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(28, 50, 28,80)
@@ -484,19 +489,19 @@ class RunningActivity : ComponentActivity() {
                 val pts = simplifyRoutePoints(rawPts)
                 if (pts.size < 2) return@launch
 
+                guidePoints = pts
+                guideTotalDistance = calculatePathDistance(pts)
                 val manager = map.routeLineManager ?: return@launch
                 val layer = manager.layer
-                guidePoints = pts
-                // 이전 가이드 라인 있으면 제거
                 runCatching { guideRoute?.let { layer.remove(it) } }
 
-                // 가이드 라인은 빨강(또는 회색) 추천
                 val style = RouteLineStyle.from(10f, Color.RED)
                 val styles = RouteLineStyles.from(style)
                 val seg = RouteLineSegment.from(pts).setStyles(styles)
                 val options = RouteLineOptions.from(seg)
-
                 guideRoute = layer.addRouteLine(options).apply { show() }
+
+                updateExpectedRouteMarker(map, pts.first())
 
                 // (선택) 시작 지점으로 한번 카메라 이동
                 // map.moveCamera(CameraUpdateFactory.newCenterPosition(pts.first()))
@@ -625,7 +630,7 @@ class RunningActivity : ComponentActivity() {
 
             if (!isRunning) return
             val map = kakaoMap ?: return
-            val manager = map.routeLineManager ?: return
+            val manager = map.routeLineManager
 
             for (loc in result.locations) {
                 val p = LatLng.from(loc.latitude, loc.longitude)
@@ -641,26 +646,35 @@ class RunningActivity : ComponentActivity() {
                     null
                 }
 
+                val recordPoint = if (followMode && projectedResult != null) {
+                    projectedResult.projected
+                } else {
+                    p
+                }
+
                 val shouldRecordPoint = shouldRecordPathPoint(
                     loc = loc,
-                    currentPoint = p,
+                    currentPoint = recordPoint,
                     projectedResult = projectedResult
                 )
 
                 if (shouldRecordPoint) {
                     if (runningPath.isNotEmpty()) {
-                        totalDistance += distanceBetween(runningPath.last(), p)
+                        totalDistance += distanceBetween(runningPath.last(), recordPoint)
                     }
-                    runningPath.add(p)
-                    drawPath(manager)
+                    runningPath.add(recordPoint)
+                    if (!followMode) {
+                        manager?.let { drawPath(it) }
+                    }
                     updateUI()
                 }
 
-                if (autoFollow) {
-                    moveCameraTo(map, p)
+                if (!followMode) {
+                    if (autoFollow) {
+                        moveCameraTo(map, p)
+                    }
+                    updateMarker(map, p)
                 }
-
-                updateMarker(map, p)
 
                 if (projectedResult != null) {
                     maxGuideProgressDistanceM = max(
@@ -670,13 +684,18 @@ class RunningActivity : ComponentActivity() {
 
                     val offRouteNow = projectedResult.distanceFromRouteM > offRouteThresholdM
 
-                    if (!wasOffRoute && offRouteNow) {
+                    val enteredOffRoute = !wasOffRoute && offRouteNow
+                    if (enteredOffRoute) {
                         offRouteCount += 1
+                        addOffRouteMarker(map, projectedResult.projected)
                     }
                     wasOffRoute = offRouteNow
                     isOffRouteNow = offRouteNow
 
                     updateExpectedRouteMarker(map, projectedResult.projected)
+                    if (autoFollow) {
+                        moveCameraTo(map, projectedResult.projected)
+                    }
 
                     val remainingM = calculateRemainingDistance(projectedResult, guidePoints)
                     val nextTurn = findNextTurn(guidePoints, projectedResult)
@@ -801,6 +820,7 @@ class RunningActivity : ComponentActivity() {
         }
 
         runningPath.clear()
+        clearRunMarkers()
         totalDistance = 0.0
         maxReachedRouteIndex = 0
         maxGuideProgressDistanceM = 0.0
@@ -818,9 +838,18 @@ class RunningActivity : ComponentActivity() {
             kakaoMap?.let { map ->
                 if (loc != null) {
                     val start = LatLng.from(loc.latitude, loc.longitude)
-                    runningPath.add(start)
-                    moveCameraTo(map, start)
-                    updateMarker(map, start)
+                    if (followMode && guidePoints.size >= 2) {
+                        val projectedStart = findProjectedPointOnRoute(start, guidePoints)?.projected
+                        if (projectedStart != null) {
+                            runningPath.add(projectedStart)
+                            moveCameraTo(map, projectedStart)
+                            updateExpectedRouteMarker(map, projectedStart)
+                        }
+                    } else {
+                        runningPath.add(start)
+                        moveCameraTo(map, start)
+                        updateMarker(map, start)
+                    }
                 }
             }
         }
@@ -832,6 +861,18 @@ class RunningActivity : ComponentActivity() {
         Toast.makeText(this, "러닝 시작!", Toast.LENGTH_SHORT).show()
     }
 
+    private fun clearRunMarkers() {
+        val layer = kakaoMap?.labelManager?.layer ?: return
+        runCatching { userLocationMarker?.let { layer.remove(it) } }
+        runCatching { expectedRouteMarker?.let { layer.remove(it) } }
+        offRouteMarkers.forEach { marker ->
+            runCatching { layer.remove(marker) }
+        }
+        userLocationMarker = null
+        expectedRouteMarker = null
+        offRouteMarkers.clear()
+    }
+
     // ✅ 러닝 종료 및 결과 반환
     private fun stopRunningAndFinish(autoCompleted: Boolean = false) {
         if (hasFinishTriggered) return
@@ -841,6 +882,27 @@ class RunningActivity : ComponentActivity() {
         isRunning = false
         timerHandler.removeCallbacks(timerTicker)
         fused.removeLocationUpdates(locationCallback)
+
+        if (followMode && guidePoints.size >= 2) {
+            val current = lastKnownLocation?.let { LatLng.from(it.latitude, it.longitude) }
+            val projectedFinish = current?.let {
+                findProjectedPointOnRoute(
+                    current = it,
+                    route = guidePoints,
+                    minProgressDistanceM = maxGuideProgressDistanceM
+                )
+            }?.projected
+
+            if (projectedFinish != null) {
+                val last = runningPath.lastOrNull()
+                if (last == null || distanceBetween(last, projectedFinish) >= 1.0) {
+                    if (last != null) {
+                        totalDistance += distanceBetween(last, projectedFinish)
+                    }
+                    runningPath.add(projectedFinish)
+                }
+            }
+        }
 
         val intent = Intent()
         intent.putExtra("runningDistance", totalDistance)
@@ -856,6 +918,7 @@ class RunningActivity : ComponentActivity() {
         intent.putExtra("offRouteCount", offRouteCount)
         intent.putExtra("followRouteTitle", followRouteTitle)
         intent.putExtra("autoCompleted", autoCompleted)
+        intent.putExtra("followCompleted", autoCompleted)
         intent.putExtra("completionStatus", if (autoCompleted) "completed" else "stopped")
 
         if (followMode && guidePoints.isNotEmpty()) {
@@ -887,14 +950,14 @@ class RunningActivity : ComponentActivity() {
     private fun updateMarker(map: KakaoMap, p: LatLng) {
         val labelManager = map.labelManager ?: return
         val layer = labelManager.layer ?: return
-        layer.removeAll()
+        runCatching { userLocationMarker?.let { layer.remove(it) } }
 
         val styles = if (userMarkerBitmap != null) {
             LabelStyle.from(userMarkerBitmap)
         } else {
             LabelStyle.from(R.drawable.loc)
         }
-        layer.addLabel(LabelOptions.from(p).setStyles(styles))
+        userLocationMarker = layer.addLabel(LabelOptions.from(p).setStyles(styles))
     }
 
     private fun drawPath(manager: RouteLineManager) {
@@ -1192,13 +1255,46 @@ class RunningActivity : ComponentActivity() {
 
         val styles = labelManager.addLabelStyles(
             LabelStyles.from(
-                LabelStyle.from(R.drawable.loc) // 전용 작은 점 아이콘 있으면 그걸 쓰는 게 더 좋음
+                LabelStyle.from(createCircleMarkerBitmap(Color.parseColor("#204996"), 28))
             )
         )
 
         expectedRouteMarker = layer.addLabel(
             LabelOptions.from(pos).setStyles(styles)
         )
+    }
+
+    private fun addOffRouteMarker(map: KakaoMap, pos: LatLng) {
+        val labelManager = map.labelManager ?: return
+        val layer = labelManager.layer ?: return
+        val styles = labelManager.addLabelStyles(
+            LabelStyles.from(
+                LabelStyle.from(createCircleMarkerBitmap(Color.parseColor("#2196F3"), 34))
+            )
+        )
+
+        val marker = layer.addLabel(LabelOptions.from(pos).setStyles(styles))
+        offRouteMarkers.add(marker)
+    }
+
+    private fun createCircleMarkerBitmap(color: Int, sizePx: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = Paint.Style.FILL
+        }
+
+        val radius = sizePx / 2f
+        canvas.drawCircle(radius, radius, radius, paint)
+
+        paint.apply {
+            this.color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = (sizePx * 0.16f).coerceAtLeast(2f)
+        }
+        canvas.drawCircle(radius, radius, radius - paint.strokeWidth / 2f, paint)
+        return bitmap
     }
     private fun updateNavigationUi(
         remainingM: Double,
