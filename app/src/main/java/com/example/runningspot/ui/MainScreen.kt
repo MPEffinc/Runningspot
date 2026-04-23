@@ -2545,7 +2545,7 @@ private fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val healthConnectManager = remember { HealthConnectManager(context) }
     var isConnected by remember { mutableStateOf(false) }
-
+    var showDisconnectDialog by remember { mutableStateOf(false) }
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { granted ->
@@ -2557,11 +2557,6 @@ private fun SettingsScreen(
         }
     }
 
-    val systemPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        requestPermissionLauncher.launch(healthConnectManager.permissions)
-    }
     // 화면 진입 시 권한 상태 확인
     LaunchedEffect(Unit) {
         if (healthConnectManager.checkAvailability() == HealthConnectClient.SDK_AVAILABLE) {
@@ -2600,35 +2595,43 @@ private fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        val status = healthConnectManager.checkAvailability()
-                        when (status) {
-                            HealthConnectClient.SDK_UNAVAILABLE -> {
-                                // 플레이스토어 설치 페이지 이동
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    data =
-                                        Uri.parse("market://details?id=com.google.android.apps.healthdata")
+                        if (isConnected) {
+                            showDisconnectDialog = true
+                        }else {
+                            val status = healthConnectManager.checkAvailability()
+                            when (status) {
+                                HealthConnectClient.SDK_UNAVAILABLE -> {
+                                    // 플레이스토어 설치 페이지 이동
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        data =
+                                            Uri.parse("market://details?id=com.google.android.apps.healthdata")
+                                    }
+                                    context.startActivity(intent)
                                 }
-                                context.startActivity(intent)
-                            }
 
-                            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
-                                Toast.makeText(context, "헬스 커넥트 업데이트가 필요합니다.", Toast.LENGTH_SHORT)
-                                    .show()
-                            }
+                                HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                    Toast.makeText(
+                                        context,
+                                        "헬스 커넥트 업데이트가 필요합니다.",
+                                        Toast.LENGTH_SHORT
+                                    )
+                                        .show()
+                                }
 
-                            else -> {
-                                coroutineScope.launch {
-                                    if (healthConnectManager.hasAllPermissions()) {
-                                        Toast.makeText(context, "이미 연결된 상태입니다.", Toast.LENGTH_SHORT)
-                                            .show()
-                                        isConnected = true
-                                    } else {
-                                        // 권한 요청 실행
-                                        systemPermissionLauncher.launch(
-                                            arrayOf(
-                                                Manifest.permission.BODY_SENSORS,
-                                                Manifest.permission.ACTIVITY_RECOGNITION)
-                                        )
+                                else -> {
+                                    coroutineScope.launch {
+                                        if (healthConnectManager.hasAllPermissions()) {
+                                            Toast.makeText(
+                                                context,
+                                                "이미 연결된 상태입니다.",
+                                                Toast.LENGTH_SHORT
+                                            )
+                                                .show()
+                                            isConnected = true
+                                        } else {
+                                            // 권한 요청 실행
+                                            requestPermissionLauncher.launch(healthConnectManager.permissions)
+                                        }
                                     }
                                 }
                             }
@@ -2637,7 +2640,7 @@ private fun SettingsScreen(
 
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isConnected) Color(0xFFF0EDFF) else Color(0xFFF8F9FA)
+                    containerColor = if (isConnected) Color(0xFFE8F0FE) else Color(0xFFF8F9FA)
                 ),
                 elevation = CardDefaults.cardElevation(0.dp)
             ) {
@@ -2645,12 +2648,11 @@ private fun SettingsScreen(
                     modifier = Modifier.padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 아이콘 섹션 (기존 해결 방식처럼 Icons.Default.Watch가 없으면 Watch 대신 다른 아이트 사용)
                     Box(
                         modifier = Modifier
                             .size(48.dp)
                             .background(
-                                if (isConnected) Color(0xFF6750A4) else Color(0xFFE9ECEF),
+                                if (isConnected) Color(0xFF204996) else Color(0xFFE9ECEF),
                                 CircleShape
                             ),
                         contentAlignment = Alignment.Center
@@ -2673,7 +2675,7 @@ private fun SettingsScreen(
                             text = if (isConnected) "데이터 동기화 중" else "AI 분석을 위해 운동 데이터를 연결하세요",
                             style = TextStyle(
                                 fontSize = 13.sp,
-                                color = if (isConnected) Color(0xFF6750A4) else Color.Gray
+                                color = if (isConnected) Color(0xFF204996) else Color.Gray
                             )
                         )
                     }
@@ -2683,7 +2685,7 @@ private fun SettingsScreen(
                         Icon(
                             Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFF6750A4)
+                            tint = Color(0xFF204996)
                         )
                     } else {
                         Icon(
@@ -2694,6 +2696,36 @@ private fun SettingsScreen(
                     }
                 }
             }
+        }
+        if (showDisconnectDialog) {
+            AlertDialog(
+                onDismissRequest = { showDisconnectDialog = false },
+                title = {
+                    Text("연결 해제", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text("갤럭시 워치 및 웨어러블 데이터 연결을 해제하시겠습니까? \n해제 시 AI 분석을 위한 데이터 동기화가 중단됩니다.")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            isConnected = false
+                            showDisconnectDialog = false
+                            Toast.makeText(context, "연결이 해제되었습니다.", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("해제", color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showDisconnectDialog = false }
+                    ) {
+                        Text("취소", color = Color.Gray)
+                    }
+                },
+                containerColor = Color.White
+            )
         }
     }
 }
@@ -3546,6 +3578,64 @@ private fun WeeklyStatsScreen(
             title = "평균 페이스",
             value = avgPaceText
         )
+        Spacer(Modifier.height(14.dp))
+
+        Text("헬스 연동 데이터", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+
+        val context = LocalContext.current
+        val healthConnectManager = remember { com.example.runningspot.HealthConnect.HealthConnectManager(context) }
+        var isWearableConnected by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
+                isWearableConnected = healthConnectManager.hasAllPermissions()
+            }
+        }
+
+        if (isWearableConnected) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SummaryCardTile(
+                    modifier = Modifier.weight(1f),
+                    title = "오늘 걸음 수",
+                    value = "불러오는 중..."
+                )
+                SummaryCardTile(
+                    modifier = Modifier.weight(1f),
+                    title = "최고 심박수",
+                    value = "불러오는 중..."
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            SummaryCardTile(
+                modifier = Modifier.fillMaxWidth(),
+                title = "웨어러블 측정 소모 칼로리",
+                value = "불러오는 중..."
+            )
+        } else {
+            androidx.compose.material3.Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+                elevation = androidx.compose.material3.CardDefaults.cardElevation(0.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.Icon(
+                        androidx.compose.material.icons.Icons.Default.Watch,
+                        contentDescription = null,
+                        tint = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text("웨어러블 기기 미연결", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("환경설정에서 기기를 연결하고\n더 정확한 심박수와 걸음 수를 확인하세요.", fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
     }
 }
