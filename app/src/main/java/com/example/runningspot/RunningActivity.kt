@@ -495,7 +495,7 @@ class RunningActivity : ComponentActivity() {
                 val layer = manager.layer
                 runCatching { guideRoute?.let { layer.remove(it) } }
 
-                val style = RouteLineStyle.from(10f, Color.RED)
+                val style = RouteLineStyle.from(10f, Color.parseColor("#2196F3"))
                 val styles = RouteLineStyles.from(style)
                 val seg = RouteLineSegment.from(pts).setStyles(styles)
                 val options = RouteLineOptions.from(seg)
@@ -913,6 +913,16 @@ class RunningActivity : ComponentActivity() {
             intent.putExtra("lat_$i", latLng.latitude)
             intent.putExtra("lng_$i", latLng.longitude)
         }
+        val followResultPath = if (followMode && autoCompleted && guidePoints.isNotEmpty()) {
+            guidePoints
+        } else {
+            runningPath
+        }
+        intent.putExtra("followPathSize", followResultPath.size)
+        followResultPath.forEachIndexed { i, latLng ->
+            intent.putExtra("follow_lat_$i", latLng.latitude)
+            intent.putExtra("follow_lng_$i", latLng.longitude)
+        }
 
         intent.putExtra("followMode", followMode)
         intent.putExtra("offRouteCount", offRouteCount)
@@ -1269,7 +1279,7 @@ class RunningActivity : ComponentActivity() {
         val layer = labelManager.layer ?: return
         val styles = labelManager.addLabelStyles(
             LabelStyles.from(
-                LabelStyle.from(createCircleMarkerBitmap(Color.parseColor("#2196F3"), 34))
+                LabelStyle.from(createCircleMarkerBitmap(Color.RED, 34))
             )
         )
 
