@@ -167,6 +167,8 @@ class RunningActivity : ComponentActivity() {
         txtTime = timeValue
         txtCalories = kcalValue
         txtDistance = distValue
+        txtHeartRate = hrValue
+        txtSteps = stepsValue
 
         val firstRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
@@ -549,34 +551,41 @@ class RunningActivity : ComponentActivity() {
         } else {
             txtPace.text = "-'--\"" // 데이터 부족
         }
-        lifecycleScope.launch {
-            // 러닝 중일 때만 헬스 데이터를 호출합니다.
-            if (isRunning && healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
+        if (absoluteStartTimeMs == 0L) {
+            txtCalories.text = "%.0f kcal".format(calcCalories(totalDistance))
+            return
+        }
+        if (elapsedTime % 5L == 0L) {
+            lifecycleScope.launch {
+                // 러닝 중일 때만 헬스 데이터를 호출합니다.
+                if (isRunning && healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
 
-                val startInst = java.time.Instant.ofEpochMilli(absoluteStartTimeMs)
-                val currentInst = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
+                    val startInst = java.time.Instant.ofEpochMilli(absoluteStartTimeMs)
+                    val currentInst = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
 
-                // 워치 데이터 읽어오기
-                val hr = healthConnectManager.readSessionAvgHeartRate(startInst, currentInst)
-                val steps = healthConnectManager.readSessionSteps(startInst, currentInst)
-                val wearableKcal = healthConnectManager.readSessionCalories(startInst, currentInst)
+                    // 워치 데이터 읽어오기
+                    val hr = healthConnectManager.readSessionAvgHeartRate(startInst, currentInst)
+                    val steps = healthConnectManager.readSessionSteps(startInst, currentInst)
+                    val wearableKcal =
+                        healthConnectManager.readSessionCalories(startInst, currentInst)
 
-                // 심박수 & 걸음수 텍스트 업데이트
-                txtHeartRate.text = if (hr > 0) "$hr bpm" else "-"
-                txtSteps.text = if (steps > 0) "${steps}보" else "-"
+                    // 심박수 & 걸음수 텍스트 업데이트
+                    txtHeartRate.text = if (hr > 0) "$hr bpm" else "-"
+                    txtSteps.text = if (steps > 0) "${steps}보" else "-"
 
-                // 칼로리는 워치 데이터가 있으면 그것을, 없으면 기존 공식 적용
-                if (wearableKcal > 0) {
-                    txtCalories.text = "%.0f kcal".format(wearableKcal)
+                    // 칼로리는 워치 데이터가 있으면 그것을, 없으면 기존 공식 적용
+                    if (wearableKcal > 0) {
+                        txtCalories.text = "%.0f kcal".format(wearableKcal)
+                    } else {
+                        val fallbackCalories = calcCalories(totalDistance)
+                        txtCalories.text = "%.0f kcal".format(fallbackCalories)
+                    }
                 } else {
-                    val fallbackCalories = calcCalories(totalDistance)
-                    txtCalories.text = "%.0f kcal".format(fallbackCalories)
-                }
-            } else {
-                // 헬스 커넥트 권한이 없거나 미연결일 때 기본 칼로리만 보여줌
+                    // 헬스 커넥트 권한이 없거나 미연결일 때 기본 칼로리만 보여줌
 
-                val calories = calcCalories(totalDistance)
-                txtCalories.text = "%.0f kcal".format(calories)
+                    val calories = calcCalories(totalDistance)
+                    txtCalories.text = "%.0f kcal".format(calories)
+                }
             }
         }
     }
