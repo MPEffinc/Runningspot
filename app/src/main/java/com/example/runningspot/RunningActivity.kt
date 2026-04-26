@@ -86,6 +86,8 @@ class RunningActivity : ComponentActivity() {
     private lateinit var txtCalories: TextView
     private lateinit var txtTime: TextView
     private lateinit var txtDistance: TextView
+    private lateinit var txtHeartRate: TextView
+    private lateinit var txtSteps: TextView
     private var startTime = 0L
     private var elapsedTime = 0L
     private var totalDistance = 0.0
@@ -158,6 +160,8 @@ class RunningActivity : ComponentActivity() {
         val (timeTile, timeValue) = makeStatTile("시간")
         val (kcalTile, kcalValue) = makeStatTile("소모 칼로리")
         val (distTile, distValue) = makeStatTile("러닝 거리")
+        val (hrTile, hrValue) = makeStatTile("심박수")
+        val (stepsTile, stepsValue) = makeStatTile("걸음 수")
 
         txtPace = paceValue
         txtTime = timeValue
@@ -174,12 +178,32 @@ class RunningActivity : ComponentActivity() {
         val secondRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 14)
             addView(kcalTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 })
             addView(distTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 8 })
+        }
+        val thirdRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(
+                hrTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginEnd = 8 })
+            addView(
+                stepsTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginStart = 8 })
         }
 
         infoLayout.addView(firstRow)
         infoLayout.addView(secondRow)
+        infoLayout.addView(thirdRow)
 
         val stopBtn = com.google.android.material.button.MaterialButton(this).apply {
             text = "러닝 종료"
@@ -509,7 +533,7 @@ class RunningActivity : ComponentActivity() {
         return weightKg * distKm * 1.0
     }
 
-    // ✅ 상단 UI 갱신
+    // ✅ UI 갱신
     private fun updateUI() {
         val durationMs = getElapsedDurationMs()
         elapsedTime = durationMs / 1000
@@ -525,10 +549,37 @@ class RunningActivity : ComponentActivity() {
         } else {
             txtPace.text = "-'--\"" // 데이터 부족
         }
-        val calories = calcCalories(totalDistance)
-        txtCalories.text = "%.0f kcal".format(calories)
-    }
+        lifecycleScope.launch {
+            // 러닝 중일 때만 헬스 데이터를 호출합니다.
+            if (isRunning && healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
 
+                val startInst = java.time.Instant.ofEpochMilli(absoluteStartTimeMs)
+                val currentInst = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
+
+                // 워치 데이터 읽어오기
+                val hr = healthConnectManager.readSessionAvgHeartRate(startInst, currentInst)
+                val steps = healthConnectManager.readSessionSteps(startInst, currentInst)
+                val wearableKcal = healthConnectManager.readSessionCalories(startInst, currentInst)
+
+                // 심박수 & 걸음수 텍스트 업데이트
+                txtHeartRate.text = if (hr > 0) "$hr bpm" else "-"
+                txtSteps.text = if (steps > 0) "${steps}보" else "-"
+
+                // 칼로리는 워치 데이터가 있으면 그것을, 없으면 기존 공식 적용
+                if (wearableKcal > 0) {
+                    txtCalories.text = "%.0f kcal".format(wearableKcal)
+                } else {
+                    val fallbackCalories = calcCalories(totalDistance)
+                    txtCalories.text = "%.0f kcal".format(fallbackCalories)
+                }
+            } else {
+                // 헬스 커넥트 권한이 없거나 미연결일 때 기본 칼로리만 보여줌
+
+                val calories = calcCalories(totalDistance)
+                txtCalories.text = "%.0f kcal".format(calories)
+            }
+        }
+    }
     // ✅ 러닝 시작 (지도 로드 완료 후 실행)
     @SuppressLint("MissingPermission")
     private fun startRunning() {
