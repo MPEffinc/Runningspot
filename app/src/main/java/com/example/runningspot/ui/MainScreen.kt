@@ -181,7 +181,10 @@ private data class RunSummaryRef(
     val distanceM: Double,
     val durationMs: Long,
     val endAt: Long,
-    val fileName: String // 내부 저장소에 저장된 경로 파일명
+    val fileName: String, // 내부 저장소에 저장된 경로 파일명
+    val wearableSteps: Long = 0L,
+    val wearableHeartRate: Long = 0L,
+    val wearableCalories: Double = 0.0
 )
 
 private enum class MyPageSubScreen {
@@ -200,6 +203,9 @@ private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef,
             put("durationMs", item.durationMs)
             put("endAt", item.endAt)
             put("fileName", item.fileName)
+            put("wearableSteps", item.wearableSteps)
+            put("wearableHeartRate", item.wearableHeartRate)
+            put("wearableCalories", item.wearableCalories)
         })
         for (i in 0 until kotlin.math.min(old.length(), maxKeep - 1)) put(old.getJSONObject(i))
     }
@@ -217,7 +223,10 @@ private fun loadRunSummaryRefs(ctx: android.content.Context): List<RunSummaryRef
                     distanceM = o.optDouble("distanceM", 0.0),
                     durationMs = o.optLong("durationMs", 0L),
                     endAt = o.optLong("endAt", 0L),
-                    fileName = o.optString("fileName", "")
+                    fileName = o.optString("fileName", ""),
+                    wearableSteps = o.optLong("wearableSteps", 0L),
+                    wearableHeartRate = o.optLong("wearableHeartRate", 0L),
+                    wearableCalories = o.optDouble("wearableCalories", 0.0)
                 )
             )
         }
@@ -366,12 +375,15 @@ fun MainScreen(
             2 -> RunningScreen(
                 padding = padding,
                 viewModel = viewModel,
-                onRunResult = { distance, duration, pathPairs ->
+                onRunResult = { distance, duration, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories ->
                     val endAt = System.currentTimeMillis()
                     // 1) 경로 파일 저장
                     val fileName = saveRunPathFile(context, endAt, pathPairs)
                     // 2) 요약 저장(SharedPreferences)
-                    val ref = RunSummaryRef(distance, duration, endAt, fileName)
+                    val ref = RunSummaryRef(distance, duration, endAt, fileName,wearableSteps = wearableSteps,
+                        wearableHeartRate = wearableHeartRate,
+                        wearableCalories = wearableCalories)
+
                     saveRunSummaryRef(context, ref)
 
                     // 3) 메모리 목록/프리뷰 갱신
@@ -457,7 +469,16 @@ fun getCircularBitmap(bitmap: Bitmap): Bitmap {
 fun RunningScreen(
     padding: PaddingValues,
     viewModel: RouteViewModel,
-    onRunResult: (Double, Long, List<Pair<Double, Double>>) -> Unit = { _, _, _ -> }
+    onRunResult: (
+        distanceM: Double,
+        durationMs: Long,
+        pathPairs: List<Pair<Double, Double>>,
+        startTimeMs: Long,
+        endTimeMs: Long,
+        wearableSteps: Long,
+        wearableHeartRate: Long,
+        wearableCalories: Double
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> }
 ) {
     // 주변 루트 리스트 관찰
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
@@ -562,6 +583,11 @@ fun RunningScreen(
             val dist = data.getDoubleExtra("runningDistance", Double.NaN)
             val time = data.getLongExtra("runningTime", -1L)
             val size = data.getIntExtra("pathSize", 0)
+            val startTimeMs = data.getLongExtra("startTimeMs", 0L)
+            val endTimeMs = data.getLongExtra("endTimeMs", 0L)
+            val wearableSteps = data.getLongExtra("wearableSteps", 0L)
+            val wearableHeartRate = data.getLongExtra("wearableHeartRate", 0L)
+            val wearableCalories = data.getDoubleExtra("wearableCalories", 0.0)
             val pathPairs = if (size > 1) {
                 (0 until size).map { i ->
                     data.getDoubleExtra("lat_$i", 0.0) to data.getDoubleExtra("lng_$i", 0.0)
@@ -569,7 +595,7 @@ fun RunningScreen(
             } else emptyList()
 
             if (!dist.isNaN() && time >= 0) {
-                onRunResult(dist, time, pathPairs)
+                onRunResult(dist, time, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories)
             }
 
             if (size > 1) {
@@ -3591,25 +3617,34 @@ private fun WeeklyStatsScreen(
                 isWearableConnected = healthConnectManager.hasAllPermissions()
             }
         }
+        // 총 걸음 수 합산
+        val totalWearableSteps = runs.sumOf { it.wearableSteps }
+
+        // 총 워치 소모 칼로리 합산
+        val totalWearableCalories = runs.sumOf { it.wearableCalories }
+
+        // 평균 심박수 계산 (0이 아닌 유효한 데이터만 모아서 평균 내기)
+        val validHeartRates = runs.map { it.wearableHeartRate }.filter { it > 0L }
+        val avgHeartRate = if (validHeartRates.isNotEmpty()) validHeartRates.average().toInt() else 0
 
         if (isWearableConnected) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SummaryCardTile(
                     modifier = Modifier.weight(1f),
-                    title = "오늘 걸음 수",
-                    value = "불러오는 중..."
+                    title = "러닝 총 걸음 수", // 통계창에 맞게 텍스트 수정
+                    value = "${totalWearableSteps}보"
                 )
                 SummaryCardTile(
                     modifier = Modifier.weight(1f),
-                    title = "최고 심박수",
-                    value = "불러오는 중..."
+                    title = "평균 심박수", // 통계창에 맞게 텍스트 수정
+                    value = if (avgHeartRate > 0) "${avgHeartRate} bpm" else "-"
                 )
             }
             Spacer(Modifier.height(12.dp))
             SummaryCardTile(
                 modifier = Modifier.fillMaxWidth(),
-                title = "웨어러블 측정 소모 칼로리",
-                value = "불러오는 중..."
+                title = "측정 소모 칼로리",
+                value = "${"%.0f".format(totalWearableCalories)} kcal"
             )
         } else {
             androidx.compose.material3.Card(

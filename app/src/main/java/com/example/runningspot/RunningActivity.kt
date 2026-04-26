@@ -76,7 +76,8 @@ class RunningActivity : ComponentActivity() {
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
     private var isRunning = false
-
+    private var absoluteStartTimeMs = 0L // 헬스 커넥트용 실제 시각
+    private lateinit var healthConnectManager: com.example.runningspot.HealthConnect.HealthConnectManager
     private var userMarkerBitmap: Bitmap? = null
     private var isPaused = false
     private var autoFollow = true
@@ -102,7 +103,8 @@ class RunningActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        //헬스매니저초기화
+        healthConnectManager = com.example.runningspot.HealthConnect.HealthConnectManager(this)
         // ✅ 루트 레이아웃 생성
         val root = android.widget.FrameLayout(this)
         mapView = MapView(this)
@@ -549,7 +551,7 @@ class RunningActivity : ComponentActivity() {
         accumulatedPauseMs = 0L
         isRunning = true
         isPaused = false
-
+        absoluteStartTimeMs = System.currentTimeMillis()
         fused.lastLocation.addOnSuccessListener { loc ->
             kakaoMap?.let { map ->
                 if (loc != null) {
@@ -571,23 +573,47 @@ class RunningActivity : ComponentActivity() {
     // ✅ 러닝 종료 및 결과 반환
     private fun stopRunningAndFinish() {
         val finalDurationMs = getElapsedDurationMs()
+        val absoluteEndTimeMs = System.currentTimeMillis() // 헬스 커넥트용 종료 시각
         isRunning = false
         timerHandler.removeCallbacks(timerTicker)
         fused.removeLocationUpdates(locationCallback)
+        Toast.makeText(this, "러닝 기록을 정리 중입니다...", Toast.LENGTH_SHORT).show()
 
-        // 결과 경로를 Intent로 반환
-        val intent = Intent()
-        intent.putExtra("runningDistance", totalDistance)
-        intent.putExtra("runningTime", finalDurationMs)
-        intent.putExtra("pathSize", runningPath.size)
-        runningPath.forEachIndexed { i, latLng ->
-            intent.putExtra("lat_$i", latLng.latitude)
-            intent.putExtra("lng_$i", latLng.longitude)
+        lifecycleScope.launch {
+            // 웨어러블 기기 데이터 동기화 시간 딜레이
+            kotlinx.coroutines.delay(1500)
+            var wearableSteps = 0L
+            var wearableHeartRate = 0L
+            var wearableCalories = 0.0
+            if (healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE &&
+                healthConnectManager.hasAllPermissions()
+            ) {
+                val startInst = java.time.Instant.ofEpochMilli(absoluteStartTimeMs)
+                val endInst = java.time.Instant.ofEpochMilli(absoluteEndTimeMs)
+
+                wearableSteps = healthConnectManager.readSessionSteps(startInst, endInst)
+                wearableHeartRate = healthConnectManager.readSessionAvgHeartRate(startInst, endInst)
+                wearableCalories = healthConnectManager.readSessionCalories(startInst, endInst)
+            }
+            // 결과 경로를 Intent로 반환
+            val intent = Intent()
+            intent.putExtra("runningDistance", totalDistance)
+            intent.putExtra("runningTime", finalDurationMs)
+            intent.putExtra("pathSize", runningPath.size)
+            runningPath.forEachIndexed { i, latLng ->
+                intent.putExtra("lat_$i", latLng.latitude)
+                intent.putExtra("lng_$i", latLng.longitude)
+            }
+            intent.putExtra("startTimeMs", absoluteStartTimeMs)
+            intent.putExtra("endTimeMs", absoluteEndTimeMs)
+            intent.putExtra("wearableSteps", wearableSteps)
+            intent.putExtra("wearableHeartRate", wearableHeartRate)
+            intent.putExtra("wearableCalories", wearableCalories)
+            setResult(RESULT_OK, intent)
+
+            Toast.makeText(this@RunningActivity, "러닝 종료!", Toast.LENGTH_SHORT).show()
+            finish()
         }
-        setResult(RESULT_OK, intent)
-
-        Toast.makeText(this, "러닝 종료!", Toast.LENGTH_SHORT).show()
-        finish()
     }
 
     // ✅ 지도 관련 함수
