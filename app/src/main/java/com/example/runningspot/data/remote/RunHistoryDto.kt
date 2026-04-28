@@ -7,7 +7,7 @@ data class RunHistoryDto(
     val ended_at: Long,
     val started_at: Long? = null,
     val points: List<RoutePointDto> = emptyList(),
-    val wearable_steps: Long = 0L,
-    val wearable_heart_rate: Long = 0L,
-    val wearable_calories: Double = 0.0
+    val wearable_steps: Long? = null,
+    val wearable_heart_rate: Long? = null,
+    val wearable_calories: Double? = null
 )

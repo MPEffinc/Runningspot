@@ -348,6 +348,7 @@ private data class RunSummaryRef(
 )
 
 private fun RunHistoryDto.toSummaryRef(): RunSummaryRef {
+    val safePoints = points ?: emptyList()
     val sortedPoints = points.sortedBy { it.seq ?: Int.MAX_VALUE }
     return RunSummaryRef(
         id = id,
@@ -355,7 +356,10 @@ private fun RunHistoryDto.toSummaryRef(): RunSummaryRef {
         durationMs = duration_ms,
         endAt = ended_at,
         pathPairs = sortedPoints.map { it.lat to it.lng },
-        fileName = "" // ✅ 추가
+        fileName = "",
+        wearableSteps = wearable_steps ?: 0L,
+        wearableHeartRate = wearable_heart_rate ?: 0L,
+        wearableCalories = wearable_calories ?: 0.0
     )
 }
 
@@ -481,6 +485,9 @@ fun MainScreen(
     var lastDistance by rememberSaveable { mutableStateOf<Double?>(null) }
     var lastDuration by rememberSaveable { mutableStateOf<Long?>(null) }
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    var lastSteps by rememberSaveable { mutableStateOf(0L) }
+    var lastHeartRate by rememberSaveable { mutableStateOf(0L) }
+    var lastCalories by rememberSaveable { mutableStateOf(0.0) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
     var myPageSubScreen by rememberSaveable { mutableStateOf(MyPageSubScreen.Main) }
     var isRunHistoryLoading by remember { mutableStateOf(false) }
@@ -496,6 +503,9 @@ fun MainScreen(
                 lastDistance = r.distanceM
                 lastDuration = r.durationMs
                 lastPath = r.pathPairs
+                lastSteps= r.wearableSteps
+                lastHeartRate=r.wearableHeartRate
+                lastCalories= r.wearableCalories
             }
         } catch (e: Exception) {
             Toast.makeText(context, "러닝 기록을 불러오지 못했어요: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -524,6 +534,9 @@ fun MainScreen(
                             lastDistance = r.distanceM
                             lastDuration = r.durationMs
                             lastPath = r.pathPairs
+                            lastSteps = r.wearableSteps
+                            lastHeartRate = r.wearableHeartRate
+                            lastCalories = r.wearableCalories
                             showHistory = false
                         },
                         onDelete = { r ->
@@ -545,10 +558,16 @@ fun MainScreen(
                                         lastDistance = first.distanceM
                                         lastDuration = first.durationMs
                                         lastPath = first.pathPairs
+                                        lastSteps = first.wearableSteps
+                                        lastHeartRate = first.wearableHeartRate
+                                        lastCalories = first.wearableCalories
                                     } else {
                                         lastDistance = null
                                         lastDuration = null
                                         lastPath = emptyList()
+                                        lastSteps = 0L
+                                        lastHeartRate = 0L
+                                        lastCalories = 0.0
                                     }
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -562,6 +581,9 @@ fun MainScreen(
                         distance = lastDistance,
                         duration = lastDuration,
                         route = lastPath,
+                        steps = lastSteps,
+                        heartRate = lastHeartRate,
+                        calories = lastCalories,
                         onShowHistory = { showHistory = true }
                     )
                 }
@@ -599,8 +621,12 @@ fun MainScreen(
                             runRepository.createRun(
                                 distanceM = saveDistance,
                                 durationMs = duration,
+                                startedAt = startTimeMs,
                                 endedAt = endAt,
-                                pathPairs = pathPairs
+                                pathPairs = pathPairs,
+                                wearableSteps = wearableSteps,
+                                wearableHeartRate = wearableHeartRate,
+                                wearableCalories = wearableCalories
                             )
                             val refreshed = fetchRunSummaryRefs(runRepository)
                             runRefs.clear()
@@ -610,6 +636,9 @@ fun MainScreen(
                             lastDistance = latest?.distanceM ?: saveDistance
                             lastDuration = latest?.durationMs ?: duration
                             lastPath = latest?.pathPairs ?: pathPairs
+                            lastSteps = latest?.wearableSteps ?: wearableSteps
+                            lastHeartRate = latest?.wearableHeartRate ?: wearableHeartRate
+                            lastCalories = latest?.wearableCalories ?: wearableCalories
                         } catch (e: Exception) {
                             Toast.makeText(context, "러닝 기록 저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
@@ -1587,18 +1616,22 @@ fun StatsScreen(
     padding: PaddingValues,
     distance: Double?, duration: Long?,
     route: List<Pair<Double, Double>>,
+    steps: Long,
+    heartRate: Long,
+    calories: Double,
     onShowHistory: () -> Unit = {}
 ) {
 
     val paceText = calcPace(distance ?: 0.0, duration ?: 0L)
         ?.let { formatPace(it) } ?: "-"
 
-    val kcalText = when {
-        distance != null && duration != null -> {
-            val kcal = calcCalories(distance)
-            "%.0f kcal".format(kcal)
-        }
-        else -> "-"
+    val kcalText = if (calories > 0.0) {
+        "%.0f kcal".format(calories)
+    } else if (distance != null && duration != null) {
+        val calcKcal = calcCalories(distance)
+        "%.0f kcal".format(calcKcal)
+    } else {
+        "-"
     }
 
     Column(
@@ -1642,6 +1675,18 @@ fun StatsScreen(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("칼로리")
                 Text(kcalText, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("평균 심박수")
+                Text(if (heartRate > 0) "$heartRate bpm" else "-", fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("걸음 수")
+                Text(if (steps > 0) "${steps}보" else "-", fontWeight = FontWeight.Bold)
             }
         }
 

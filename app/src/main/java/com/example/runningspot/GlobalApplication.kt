@@ -10,8 +10,8 @@ class GlobalApplication : Application() {
         super.onCreate()
         // 네이티브 앱 키 등록
         runCatching {
-            KakaoMapSdk.init(this, "4a0414c61069e75577764b8ea65c26e9")
-            KakaoSdk.init(this, "4a0414c61069e75577764b8ea65c26e9")
+            KakaoMapSdk.init(this, "a79a645b5b5c9b0707a7ebe4316ef1ad")
+            KakaoSdk.init(this, "a79a645b5b5c9b0707a7ebe4316ef1ad")
         }.onFailure { t ->
             Log.e("GlobalApplication", "Kakao SDK init failed", t)
         }

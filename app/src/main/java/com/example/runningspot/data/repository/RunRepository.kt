@@ -27,11 +27,16 @@ class RunRepository {
         distanceM: Double,
         durationMs: Long,
         endedAt: Long,
-        pathPairs: List<Pair<Double, Double>>
+        startedAt: Long?,
+        pathPairs: List<Pair<Double, Double>>,
+        wearableSteps: Long,
+        wearableHeartRate: Long,
+        wearableCalories: Double
     ): Long {
         val body = CreateRunRecordRequest(
             distance_m = distanceM,
             duration_ms = durationMs,
+            started_at= startedAt,
             ended_at = endedAt,
             points = pathPairs.mapIndexed { index, (lat, lng) ->
                 RoutePointDto(
@@ -39,7 +44,10 @@ class RunRepository {
                     lat = lat,
                     lng = lng
                 )
-            }
+            },
+            wearable_steps = wearableSteps,
+            wearable_heart_rate = wearableHeartRate,
+            wearable_calories = wearableCalories
         )
 
         return ApiClient.runApi.createRun(getBearerToken(), body).id
