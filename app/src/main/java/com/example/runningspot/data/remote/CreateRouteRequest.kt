@@ -9,5 +9,8 @@ data class CreateRouteRequest(
     val end_lng: Double,
     val visibility: String = "PUBLIC",
     val points: List<RoutePointDto> = emptyList(),
-    val profile_image_url: String? = null
+    val profile_image_url: String? = null,
+    val wearable_steps: Long,
+    val wearable_heart_rate: Long,
+    val wearable_calories: Double
 )

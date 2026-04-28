@@ -8,17 +8,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
-import android.widget.NumberPicker
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,8 +26,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-  import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -71,7 +64,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -88,10 +80,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.CommunityActivity
 import com.example.runningspot.R
-import com.example.runningspot.RunningActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -112,6 +102,7 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -119,33 +110,31 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Matrix
 import android.media.ExifInterface
+import android.widget.NumberPicker
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.kakao.sdk.user.UserApiClient
-import com.example.runningspot.data.CrewRepository
+import com.example.runningspot.data.repository.CrewRepository
 import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
 import com.example.runningspot.data.remote.ApiClient
-import com.example.runningspot.data.remote.NearbyRouteDto
-import com.example.runningspot.ui.theme.DialogContainer
-import com.example.runningspot.ui.theme.DialogText
-import com.example.runningspot.ui.theme.DialogTitle
+import com.example.runningspot.data.remote.RunHistoryDto
 import com.example.runningspot.viewmodel.RouteViewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -155,37 +144,224 @@ import kotlinx.coroutines.tasks.await
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Settings
+import com.example.runningspot.ui.theme.DialogContainer
+import com.example.runningspot.ui.theme.DialogText
+import com.example.runningspot.ui.theme.DialogTitle
 
 import androidx.compose.material3.*
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.ui.platform.LocalConfiguration
+import com.kakao.vectormap.label.LabelTextBuilder
 import kotlin.math.roundToInt
-import androidx.compose.foundation.layout.*
+import com.example.runningspot.data.remote.PrefetchedLocation
+
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Watch
-import androidx.compose.runtime.*
 import androidx.compose.ui.text.TextStyle
 import androidx.health.connect.client.HealthConnectClient
 import com.example.runningspot.HealthConnect.HealthConnectManager
 import androidx.health.connect.client.PermissionController
+import com.example.runningspot.RunningActivity
+import com.example.runningspot.data.repository.CommunityPostRepository
+import com.example.runningspot.data.repository.RunRepository
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
 private const val RUN_KEY = "runs_json"
+private fun distanceMeters(
+    lat1: Double,
+    lng1: Double,
+    lat2: Double,
+    lng2: Double
+): Double {
+    val result = FloatArray(1)
+    android.location.Location.distanceBetween(lat1, lng1, lat2, lng2, result)
+    return result[0].toDouble()
+}
 
+private fun calculateRouteTotalDistance(points: List<com.example.runningspot.data.remote.RoutePointDto>): Double {
+    if (points.size < 2) return 0.0
+
+    val sorted = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+    var sum = 0.0
+
+    for (i in 0 until sorted.lastIndex) {
+        val a = sorted[i]
+        val b = sorted[i + 1]
+        sum += distanceMeters(a.lat, a.lng, b.lat, b.lng)
+    }
+
+    return sum
+}
+@Composable
+private fun FollowRunResultCard(
+    routeName: String,
+    completed: Boolean,
+    distanceM: Double,
+    offRouteCount: Int,
+    paceText: String,
+    completionLabel: String,
+    pathPairs: List<Pair<Double, Double>>,
+    onClose: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp)
+        ) {
+            Text(
+                text = if (completed) "따라뛰기 완료" else "따라뛰기 종료",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = routeName.ifBlank { "선택한 루트" },
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            if (pathPairs.size > 1) {
+                MapRoutePreview(
+                    path = pathPairs,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            RouteInfoRow("완료 여부", completionLabel)
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("뛴 거리", "${"%.2f".format(distanceM / 1000.0)} km")
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("이탈 횟수", "${offRouteCount}회")
+            Spacer(modifier = Modifier.height(8.dp))
+            RouteInfoRow("평균 페이스", paceText)
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Button(
+                onClick = onClose,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("닫기")
+            }
+        }
+    }
+}
+
+private data class FollowRunResultUiState(
+    val routeName: String,
+    val completed: Boolean,
+    val distanceM: Double,
+    val offRouteCount: Int,
+    val paceText: String,
+    val completionLabel: String,
+    val pathPairs: List<Pair<Double, Double>>
+
+)
+
+private data class RouteProgressResult(
+    val nearestIndex: Int,
+    val completedDistanceM: Double,
+    val remainingDistanceM: Double,
+    val progressPercent: Int,
+    val distanceFromRouteM: Double,
+    val isCompleted: Boolean
+)
+
+private fun calculateProgressByNearestPoint(
+    currentLat: Double,
+    currentLng: Double,
+    points: List<com.example.runningspot.data.remote.RoutePointDto>
+): RouteProgressResult? {
+    if (points.size < 2) return null
+
+    val sorted = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+
+    var nearestIndex = -1
+    var nearestDistance = Double.MAX_VALUE
+
+    sorted.forEachIndexed { index, point ->
+        val d = distanceMeters(currentLat, currentLng, point.lat, point.lng)
+        if (d < nearestDistance) {
+            nearestDistance = d
+            nearestIndex = index
+        }
+    }
+
+    if (nearestIndex == -1) return null
+
+    var completed = 0.0
+    for (i in 0 until nearestIndex) {
+        val a = sorted[i]
+        val b = sorted[i + 1]
+        completed += distanceMeters(a.lat, a.lng, b.lat, b.lng)
+    }
+
+    val total = calculateRouteTotalDistance(sorted)
+    val remaining = (total - completed).coerceAtLeast(0.0)
+    val progress = if (total > 0.0) {
+        ((completed / total) * 100).toInt().coerceIn(0, 100)
+    } else {
+        0
+    }
+
+    val isCompleted = progress >= 98 || nearestIndex >= sorted.lastIndex
+
+    return RouteProgressResult(
+        nearestIndex = nearestIndex,
+        completedDistanceM = completed,
+        remainingDistanceM = remaining,
+        progressPercent = progress,
+        distanceFromRouteM = nearestDistance,
+        isCompleted = isCompleted
+    )
+}
 private data class RunSummaryRef(
     val distanceM: Double,
     val durationMs: Long,
     val endAt: Long,
-    val fileName: String, // 내부 저장소에 저장된 경로 파일명
+    val pathPairs: List<Pair<Double, Double>> = emptyList(),
+    val id: Long? = null,
+    val fileName: String,
     val wearableSteps: Long = 0L,
     val wearableHeartRate: Long = 0L,
     val wearableCalories: Double = 0.0
 )
+
+private fun RunHistoryDto.toSummaryRef(): RunSummaryRef {
+    val sortedPoints = points.sortedBy { it.seq ?: Int.MAX_VALUE }
+    return RunSummaryRef(
+        id = id,
+        distanceM = distance_m,
+        durationMs = duration_ms,
+        endAt = ended_at,
+        pathPairs = sortedPoints.map { it.lat to it.lng },
+        fileName = "" // ✅ 추가
+    )
+}
+
+private suspend fun fetchRunSummaryRefs(repository: RunRepository): List<RunSummaryRef> {
+    return repository.getMyRuns().map { it.toSummaryRef() }
+}
 
 private enum class MyPageSubScreen {
     Main,
@@ -290,12 +466,15 @@ fun MainScreen(
     userName: String?,
     userProfile: String?,
     provider: String?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    initialLocation: PrefetchedLocation? = null
 ) {
     val viewModel: RouteViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var selectedTab by remember { mutableStateOf(2) } // 기본 러닝 탭 선택
 
     val context = LocalContext.current
+    val runRepository = remember { RunRepository() }
+    val screenScope = rememberCoroutineScope()
 
 // 기록/통계 상태
     var showHistory by rememberSaveable { mutableStateOf(false) }
@@ -304,23 +483,30 @@ fun MainScreen(
     var lastPath by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
     var myPageSubScreen by rememberSaveable { mutableStateOf(MyPageSubScreen.Main) }
+    var isRunHistoryLoading by remember { mutableStateOf(false) }
 
-// 앱 시작 시 저장된 기록 읽어오기
+// 앱 시작 시 서버에 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
-        runRefs.clear()
-        runRefs.addAll(loadRunSummaryRefs(context))
-        runRefs.firstOrNull()?.let { r ->
-            lastDistance = r.distanceM
-            lastDuration = r.durationMs
-            lastPath = loadRunPathFile(context, r.fileName)
+        isRunHistoryLoading = true
+        try {
+            val serverRuns = fetchRunSummaryRefs(runRepository)
+            runRefs.clear()
+            runRefs.addAll(serverRuns)
+            runRefs.firstOrNull()?.let { r ->
+                lastDistance = r.distanceM
+                lastDuration = r.durationMs
+                lastPath = r.pathPairs
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "러닝 기록을 불러오지 못했어요: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+        isRunHistoryLoading = false
     }
 
 
     Scaffold(
         bottomBar = { BottomNavBar(selectedTab, onTabSelected = { selectedTab = it }) }
     ) { padding ->
-
         BackHandler(enabled = selectedTab == 4 && myPageSubScreen != MyPageSubScreen.Main) {
             myPageSubScreen = MyPageSubScreen.Main
         }
@@ -331,30 +517,42 @@ fun MainScreen(
                     HistoryList(
                         padding = padding,
                         runs = runRefs,
+                        isLoading = isRunHistoryLoading,
                         userName = userName,
                         onBack = { showHistory = false },
                         onSelect = { r ->
                             lastDistance = r.distanceM
                             lastDuration = r.durationMs
-                            lastPath = loadRunPathFile(context, r.fileName)
+                            lastPath = r.pathPairs
                             showHistory = false
                         },
                         onDelete = { r ->
-                            // 1) 저장소에서 삭제
-                            deleteRunSummaryRef(context, r)
-                            // 2) 메모리 목록에서 삭제
-                            runRefs.remove(r)
+                            screenScope.launch {
+                                val runId = r.id
+                                if (runId == null) {
+                                    Toast.makeText(context, "서버 기록 id가 없어 삭제할 수 없어요.", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
 
-                            // 3) 통계 화면에 보여줄 마지막 기록 갱신
-                            if (runRefs.isNotEmpty()) {
-                                val first = runRefs.first()
-                                lastDistance = first.distanceM
-                                lastDuration = first.durationMs
-                                lastPath = loadRunPathFile(context, first.fileName)
-                            } else {
-                                lastDistance = null
-                                lastDuration = null
-                                lastPath = emptyList()
+                                try {
+                                    runRepository.deleteRun(runId)
+                                    val refreshed = fetchRunSummaryRefs(runRepository)
+                                    runRefs.clear()
+                                    runRefs.addAll(refreshed)
+
+                                    if (runRefs.isNotEmpty()) {
+                                        val first = runRefs.first()
+                                        lastDistance = first.distanceM
+                                        lastDuration = first.durationMs
+                                        lastPath = first.pathPairs
+                                    } else {
+                                        lastDistance = null
+                                        lastDuration = null
+                                        lastPath = emptyList()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     )
@@ -375,22 +573,47 @@ fun MainScreen(
             2 -> RunningScreen(
                 padding = padding,
                 viewModel = viewModel,
-                onRunResult = { distance, duration, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories ->
+                initialLocation = initialLocation,
+                onRunResult = { distance, duration, pathPairs,startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories ->
                     val endAt = System.currentTimeMillis()
-                    // 1) 경로 파일 저장
-                    val fileName = saveRunPathFile(context, endAt, pathPairs)
-                    // 2) 요약 저장(SharedPreferences)
-                    val ref = RunSummaryRef(distance, duration, endAt, fileName,wearableSteps = wearableSteps,
-                        wearableHeartRate = wearableHeartRate,
-                        wearableCalories = wearableCalories)
+                    screenScope.launch {
+                        if (pathPairs.size < 2) {
+                            Toast.makeText(context, "경로가 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
 
-                    saveRunSummaryRef(context, ref)
+                        try {
+                            val saveDistance = if (distance > 0.0) {
+                                distance
+                            } else {
+                                pathPairs.zipWithNext().sumOf { (a, b) ->
+                                    distanceMeters(a.first, a.second, b.first, b.second)
+                                }
+                            }
 
-                    // 3) 메모리 목록/프리뷰 갱신
-                    runRefs.add(0, ref)
-                    lastDistance = distance
-                    lastDuration = duration
-                    lastPath = pathPairs
+                            if (saveDistance <= 0.0) {
+                                Toast.makeText(context, "거리가 너무 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+
+                            runRepository.createRun(
+                                distanceM = saveDistance,
+                                durationMs = duration,
+                                endedAt = endAt,
+                                pathPairs = pathPairs
+                            )
+                            val refreshed = fetchRunSummaryRefs(runRepository)
+                            runRefs.clear()
+                            runRefs.addAll(refreshed)
+
+                            val latest = runRefs.firstOrNull()
+                            lastDistance = latest?.distanceM ?: saveDistance
+                            lastDuration = latest?.durationMs ?: duration
+                            lastPath = latest?.pathPairs ?: pathPairs
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "러닝 기록 저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             )
             3 -> CommunityScreen(padding, userName)
@@ -469,6 +692,7 @@ fun getCircularBitmap(bitmap: Bitmap): Bitmap {
 fun RunningScreen(
     padding: PaddingValues,
     viewModel: RouteViewModel,
+    initialLocation: PrefetchedLocation? = null,
     onRunResult: (
         distanceM: Double,
         durationMs: Long,
@@ -482,7 +706,6 @@ fun RunningScreen(
 ) {
     // 주변 루트 리스트 관찰
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState(initial = emptyList())
-
     val coroutineScope = rememberCoroutineScope() //
 
     val context = LocalContext.current
@@ -495,20 +718,21 @@ fun RunningScreen(
     var isRunning by remember { mutableStateOf(false) }
     val runningPath = remember { mutableStateListOf<LatLng>() }
     var currentRoute by remember { mutableStateOf<RouteLine?>(null) }
-    var selectedNearbyRoute by remember { mutableStateOf<RouteLine?>(null) }
     var showRunningDialog by remember { mutableStateOf(false) }
-
+    var selectedNearbyRoute by remember { mutableStateOf<RouteLine?>(null) }
+    var selectedRouteDetail by remember {
+        mutableStateOf<com.example.runningspot.data.remote.RouteDetailDto?>(null)
+    }
+    var followRunResult by remember { mutableStateOf<FollowRunResultUiState?>(null) }
     val configuration = LocalConfiguration.current
     val sheetPeekHeight = remember(configuration.screenHeightDp) {
         (configuration.screenHeightDp * 0.25f).dp.coerceIn(170.dp, 260.dp)
     }
     val fabBottomPadding = (sheetPeekHeight * 0.6f).coerceAtLeast(96.dp)
-
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded
     )
     val scaffoldState = rememberBottomSheetScaffoldState(sheetState)
-
     val onSelectNearbyRoute: (Long) -> Unit = { id ->
         val targetRoute = nearbyRoutes.find { it.id == id }
 
@@ -516,6 +740,8 @@ fun RunningScreen(
             var drewRoute = false
             runCatching {
                 val detail = ApiClient.routeApi.getRouteDetail(id)
+                selectedRouteDetail = detail
+
                 kakaoMap?.let { map ->
                     selectedNearbyRoute = drawSelectedRouteOnMap(
                         map = map,
@@ -524,8 +750,22 @@ fun RunningScreen(
                     )
                     drewRoute = selectedNearbyRoute != null
                 }
-            }.onFailure {
+            }.onFailure { e ->
+                android.util.Log.e("RouteDraw", "getRouteDetail or draw failed", e)
+
                 val fallbackPoints = targetRoute?.points.orEmpty()
+
+                targetRoute?.let { route ->
+                    selectedRouteDetail = com.example.runningspot.data.remote.RouteDetailDto(
+                        id = route.id,
+                        title = route.title,
+                        distance_m = route.distance_m,
+                        start_lat = route.start_lat,
+                        start_lng = route.start_lng,
+                        points = fallbackPoints
+                    )
+                }
+
                 kakaoMap?.let { map ->
                     selectedNearbyRoute = drawRoutePointsOnMap(
                         map = map,
@@ -564,7 +804,6 @@ fun RunningScreen(
             }
         }
     }
-
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -582,7 +821,13 @@ fun RunningScreen(
 
             val dist = data.getDoubleExtra("runningDistance", Double.NaN)
             val time = data.getLongExtra("runningTime", -1L)
+            val followMode = data.getBooleanExtra("followMode", false)
+            val offRouteCount = data.getIntExtra("offRouteCount", 0)
+            val followRouteTitle = data.getStringExtra("followRouteTitle").orEmpty()
+            val followCompleted = data.getBooleanExtra("followCompleted", false)
+            val autoCompleted = data.getBooleanExtra("autoCompleted", false)
             val size = data.getIntExtra("pathSize", 0)
+            val safeDist = if (dist.isNaN()) 0.0 else dist
             val startTimeMs = data.getLongExtra("startTimeMs", 0L)
             val endTimeMs = data.getLongExtra("endTimeMs", 0L)
             val wearableSteps = data.getLongExtra("wearableSteps", 0L)
@@ -593,12 +838,32 @@ fun RunningScreen(
                     data.getDoubleExtra("lat_$i", 0.0) to data.getDoubleExtra("lng_$i", 0.0)
                 }
             } else emptyList()
+            val followPathSize = data.getIntExtra("followPathSize", 0)
+            val followPathPairs = if (followPathSize > 1) {
+                (0 until followPathSize).map { i ->
+                    data.getDoubleExtra("follow_lat_$i", 0.0) to
+                            data.getDoubleExtra("follow_lng_$i", 0.0)
+                }
+            } else pathPairs
+
+            if (followMode && time >= 0) {
+                val paceText = calcPace(safeDist, time)?.let(::formatPace) ?: "-"
+                followRunResult = FollowRunResultUiState(
+                    routeName = followRouteTitle,
+                    completed = followCompleted,
+                    distanceM = safeDist,
+                    offRouteCount = offRouteCount,
+                    paceText = paceText,
+                    completionLabel = if (autoCompleted) "완료" else "중도 종료",
+                    pathPairs = followPathPairs
+                )
+            }
 
             if (!dist.isNaN() && time >= 0) {
                 onRunResult(dist, time, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories)
             }
 
-            if (size > 1) {
+            if (size > 1 && !followMode) {
                 val path = (0 until size).map { i ->
                     LatLng.from(
                         data.getDoubleExtra("lat_$i", 0.0),
@@ -616,6 +881,7 @@ fun RunningScreen(
             }
         }
     }
+
 
     LaunchedEffect(Unit) {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -645,24 +911,42 @@ fun RunningScreen(
         }
     }
 
-    val readyCb = remember {
+    val readyCb = remember(initialLocation, hasLocationPermission) {
         object : KakaoMapReadyCallback() {
             override fun onMapReady(map: KakaoMap) {
                 Log.d("RUNNINGSPOTDEBUG", "KakaoMap Ready.")
                 kakaoMap = map
 
-                if (hasLocationPermission) {
+                // 1차: MainActivity에서 미리 받아둔 위치를 바로 사용
+                if (initialLocation != null) {
+                    moveCameraTo(map, initialLocation.lat, initialLocation.lng)
+                    updateCurrentLabel(context, map, initialLocation.lat, initialLocation.lng)
+                    viewModel.loadNearbyRoutes(initialLocation.lat, initialLocation.lng)
+
+                    // 2차: 더 정확한 현재 위치로 보정
+                    if (hasLocationPermission) {
+                        getSingleFix(fusedLocationClient) { lat, lng ->
+                            moveCameraTo(map, lat, lng)
+                            updateCurrentLabel(context, map, lat, lng)
+                            viewModel.loadNearbyRoutes(lat, lng)
+                        }
+                    }
+                } else if (hasLocationPermission) {
+                    // 미리 받아둔 위치가 없으면 기존 방식대로 현재 위치
                     getSingleFix(fusedLocationClient) { lat, lng ->
                         moveCameraTo(map, lat, lng)
                         updateCurrentLabel(context, map, lat, lng)
-
-                        // 내 위치를 주변 루트를 달라고 요청
                         viewModel.loadNearbyRoutes(lat, lng)
                     }
                 }
             }
 
-            override fun getPosition(): LatLng = LatLng.from(37.406960, 127.115587)
+            override fun getPosition(): LatLng {
+                return initialLocation?.let {
+                    LatLng.from(it.lat, it.lng)
+                } ?: LatLng.from(37.406960, 127.115587)
+            }
+
             override fun getZoomLevel(): Int = 15
         }
     }
@@ -746,13 +1030,31 @@ fun RunningScreen(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-
                 Box(modifier = Modifier.weight(1f)) {
-                    NearbyRoutesSection(
-                        viewModel = viewModel,
-                        autoLoadNearbyOnStart = false,
-                        onRouteClick = onSelectNearbyRoute
-                    )
+                    if (selectedRouteDetail != null) {
+                        SelectedRoutePreviewCard(
+                            route = selectedRouteDetail!!,
+                            onBackToList = {
+                                selectedRouteDetail = null
+                            },
+                            onStartFollowRun = {
+                                selectedRouteDetail?.let { detail ->
+                                    val intent = Intent(context, RunningActivity::class.java).apply {
+                                        putExtra("run_mode", "follow")
+                                        putExtra("follow_route_id", detail.id)
+                                        putExtra("follow_route_title", detail.title)
+                                    }
+                                    launcher.launch(intent)
+                                }
+                            }
+                        )
+                    } else {
+                        NearbyRoutesSection(
+                            viewModel = viewModel,
+                            autoLoadNearbyOnStart = false,
+                            onRouteClick = onSelectNearbyRoute
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -826,10 +1128,130 @@ fun RunningScreen(
                     Text("러닝 시작", fontWeight = FontWeight.Bold)
                 }
             }
+            followRunResult?.let { result ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.32f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { followRunResult = null }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 24.dp)
+                    ) {
+                        FollowRunResultCard(
+                            routeName = result.routeName,
+                            completed = result.completed,
+                            distanceM = result.distanceM,
+                            offRouteCount = result.offRouteCount,
+                            paceText = result.paceText,
+                            completionLabel = result.completionLabel,
+                            pathPairs = result.pathPairs,
+                            onClose = { followRunResult = null }
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+@Composable
+private fun FollowRunningCard(
+    route: com.example.runningspot.data.remote.RouteDetailDto,
+    progressPercent: Int,
+    completedDistanceM: Double,
+    remainingDistanceM: Double,
+    isOffRoute: Boolean,
+    offRouteCount: Int,
+    onStop: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = "따라뛰기 진행 중",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = route.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = "루트 진행률 $progressPercent%",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                LinearProgressIndicator(
+                    progress = { progressPercent / 100f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                RouteInfoRow(
+                    label = "완료 거리",
+                    value = "${"%.2f".format(completedDistanceM / 1000.0)} km"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "남은 거리",
+                    value = "${"%.2f".format(remainingDistanceM / 1000.0)} km"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "이탈 상태",
+                    value = if (isOffRoute) "경로 이탈" else "경로 유지 중"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                RouteInfoRow(
+                    label = "이탈 횟수",
+                    value = "${offRouteCount}회"
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedButton(
+                    onClick = onStop,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("따라뛰기 종료")
+                }
+            }
+        }
+    }
+}
 private fun showNicknameMarkers(
     kakaoMap: KakaoMap,
     routes: List<com.example.runningspot.data.remote.NearbyRouteDto>,
@@ -860,8 +1282,11 @@ private fun showNicknameMarkers(
 
         val style = LabelStyle.from(com.example.runningspot.R.drawable.ic_launcher_foreground)
 
+        val nicknameText = route.nickname ?: "이름 없음"
+
         val options = LabelOptions.from(pos)
             .setStyles(style)
+            .setTexts(LabelTextBuilder().setTexts(nicknameText))
             .setTag(route.id)
 
         layer.addLabel(options)
@@ -913,6 +1338,7 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
 
     layer?.removeAll()
 
+
     val style = if (userMarkerImageUri.isNullOrBlank()) {
         // 기본 마커는 drawable 리소스를 직접 사용해 GL bitmap 변환 경로를 단순화
         LabelStyle.from(R.drawable.loc)
@@ -949,7 +1375,10 @@ private fun updateCurrentLabel(context : Context, map: KakaoMap, lat: Double, ln
             bmp = try {
                 context.contentResolver.openInputStream(uri).use { ins ->
                     val exif = ExifInterface(ins!!)
-                    val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                    val orientation = exif.getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL
+                    )
                     val matrix = Matrix()
                     when (orientation) {
                         ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
@@ -1003,29 +1432,56 @@ private fun drawRunningPath(
     newRoute.show()
     onUpdate(newRoute)
 }
-
 private fun drawSelectedRouteOnMap(
     map: KakaoMap,
     detail: com.example.runningspot.data.remote.RouteDetailDto,
     previousRoute: RouteLine?
 ): RouteLine? {
-    val routePath = detail.points
+    val cleanedPoints = detail.points
         .sortedBy { it.seq }
-        .map { LatLng.from(it.lat, it.lng) }
-    if (routePath.size < 2) return null
+        .distinctBy { "${it.lat},${it.lng}" }   // 중복 좌표 제거
 
-    val manager = map.routeLineManager ?: return null
+    android.util.Log.d("RouteDraw", "detail.points size=${detail.points.size}, cleaned=${cleanedPoints.size}")
+
+    val routePath = cleanedPoints.map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) {
+        android.util.Log.e("RouteDraw", "routePath size < 2")
+        return null
+    }
+
+    val manager = map.routeLineManager
+    if (manager == null) {
+        android.util.Log.e("RouteDraw", "routeLineManager is null")
+        return null
+    }
+
     val layer = manager.layer
-    previousRoute?.let { layer.remove(it) }
 
-    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
-    route.show()
+    return try {
+        previousRoute?.let { layer.remove(it) }
 
-    val avgLat = routePath.map { it.latitude }.average()
-    val avgLng = routePath.map { it.longitude }.average()
-    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+        val style = RouteLineStyle.from(10f, android.graphics.Color.BLUE)
+        val styles = RouteLineStyles.from(style)
+        val segment = RouteLineSegment.from(routePath).setStyles(styles)
+        val options = RouteLineOptions.from(segment)
 
-    return route
+        val route = layer.addRouteLine(options)
+        route.show()
+
+        val avgLat = routePath.map { it.latitude }.average()
+        val avgLng = routePath.map { it.longitude }.average()
+        map.moveCamera(
+            CameraUpdateFactory.newCenterPosition(
+                LatLng.from(avgLat, avgLng)
+            )
+        )
+
+        android.util.Log.d("RouteDraw", "route draw success")
+        route
+    } catch (e: Exception) {
+        android.util.Log.e("RouteDraw", "drawSelectedRouteOnMap failed", e)
+        null
+    }
 }
 
 private fun drawRoutePointsOnMap(
@@ -1033,36 +1489,71 @@ private fun drawRoutePointsOnMap(
     points: List<com.example.runningspot.data.remote.RoutePointDto>,
     previousRoute: RouteLine?
 ): RouteLine? {
-    val routePath = points
+    val cleanedPoints = points
         .sortedBy { it.seq }
-        .map { LatLng.from(it.lat, it.lng) }
-    if (routePath.size < 2) return null
+        .distinctBy { "${it.lat},${it.lng}" }
 
-    val manager = map.routeLineManager ?: return null
+    android.util.Log.d("RouteDraw", "fallback points size=${points.size}, cleaned=${cleanedPoints.size}")
+
+    val routePath = cleanedPoints.map { LatLng.from(it.lat, it.lng) }
+    if (routePath.size < 2) {
+        android.util.Log.e("RouteDraw", "fallback routePath size < 2")
+        return null
+    }
+
+    val manager = map.routeLineManager
+    if (manager == null) {
+        android.util.Log.e("RouteDraw", "fallback routeLineManager is null")
+        return null
+    }
+
     val layer = manager.layer
-    previousRoute?.let { layer.remove(it) }
 
-    val route = layer.addRouteLine(RouteLineOptions.from(RouteLineSegment.from(routePath)))
-    route.show()
+    return try {
+        previousRoute?.let { layer.remove(it) }
 
-    val avgLat = routePath.map { it.latitude }.average()
-    val avgLng = routePath.map { it.longitude }.average()
-    map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(avgLat, avgLng)))
+        val style = RouteLineStyle.from(10f, android.graphics.Color.BLUE)
+        val styles = RouteLineStyles.from(style)
+        val segment = RouteLineSegment.from(routePath).setStyles(styles)
+        val options = RouteLineOptions.from(segment)
 
-    return route
+        val route = layer.addRouteLine(options)
+        route.show()
+
+        val avgLat = routePath.map { it.latitude }.average()
+        val avgLng = routePath.map { it.longitude }.average()
+        map.moveCamera(
+            CameraUpdateFactory.newCenterPosition(
+                LatLng.from(avgLat, avgLng)
+            )
+        )
+
+        android.util.Log.d("RouteDraw", "fallback route draw success")
+        route
+    } catch (e: Exception) {
+        android.util.Log.e("RouteDraw", "drawRoutePointsOnMap failed", e)
+        null
+    }
 }
-
-
 
 @SuppressLint("MissingPermission")
 private fun getSingleFix(
     fused: FusedLocationProviderClient,
     onFix: (Double, Double) -> Unit
 ) {
-    val cts = CancellationTokenSource()
-    fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
-        .addOnSuccessListener { loc ->
-            if (loc != null) onFix(loc.latitude, loc.longitude)
+    fused.lastLocation
+        .addOnSuccessListener { lastLoc ->
+            if (lastLoc != null) {
+                onFix(lastLoc.latitude, lastLoc.longitude)
+            } else {
+                val cts = CancellationTokenSource()
+                fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+                    .addOnSuccessListener { loc ->
+                        if (loc != null) {
+                            onFix(loc.latitude, loc.longitude)
+                        }
+                    }
+            }
         }
 }
 
@@ -1172,7 +1663,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("community_prefs", Context.MODE_PRIVATE)
-    val repo = remember { com.example.runningspot.data.CommunityPostRepository() }
+    val repo = remember { CommunityPostRepository() }
     val scope = rememberCoroutineScope()
 
 
@@ -1190,10 +1681,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         // Firestore에서 최신 글 읽기
         val remote = repo.fetchLatestPosts(50)
 
-        // Firestore -> UI Post로 변환 (title 우선, 없으면 content 일부를 fallback으로 사용)
+        // Firestore -> UI Post로 변환 (title이 Firestore에 없어서 임시로 content 앞부분을 title로 사용)
         val remotePostsForUi: List<Post> = remote.map { (docId, p) ->
             Post(
-                id = docId.hashCode(),              // ⚠️ 임시: UI가 Int id라서 docId를 hash로 변환
+                id = docId.hashCode(),
                 docId = docId,
                 title = p.title.ifBlank { p.content.take(18) },
                 authorName = p.userName.ifBlank { "익명" },
@@ -1513,10 +2004,10 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 // ✅ 선택 다이얼로그
         if (showWritePicker) {
             AlertDialog(
-                onDismissRequest = { showWritePicker = false },
                 containerColor = DialogContainer,
                 titleContentColor = DialogTitle,
                 textContentColor = DialogText,
+                onDismissRequest = { showWritePicker = false },
                 title = { Text("무엇을 작성할까요?") },
                 text = {
                     Column {
@@ -1566,7 +2057,6 @@ fun CrewPostCard(
 ) {
     val isClosed = crew.currentMembers >= crew.maxMembers
     val cardColor = if (!isJoined && isClosed) Color(0xFFF0F0EE) else Color(0xFFFAFAF8)
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1657,7 +2147,16 @@ fun logoutAll(
     provider: String?,
     onLoggedOut: () -> Unit
 ) {
+    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun finishLogout() {
+        mainHandler.post {
+            onLoggedOut()
+        }
+    }
+
     FirebaseAuth.getInstance().signOut()
+
     when (provider?.lowercase()) {
         "google" -> {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -1667,15 +2166,22 @@ fun logoutAll(
 
             GoogleSignIn.getClient(context, gso)
                 .signOut()
-                .addOnCompleteListener { onLoggedOut() }
+                .addOnCompleteListener {
+                    finishLogout()
+                }
         }
+
         "kakao" -> {
-            UserApiClient.instance.logout { _ ->
-                onLoggedOut()
+            UserApiClient.instance.logout { error ->
+                if (error != null) {
+                    Log.e("LOGOUT", "Kakao logout failed", error)
+                }
+                finishLogout()
             }
         }
+
         else -> {
-            onLoggedOut()
+            finishLogout()
         }
     }
 }
@@ -1689,7 +2195,7 @@ fun MyPageScreen(
     onShowInfo: () -> Unit,
     onOpenProfileSettings: () -> Unit,
     onOpenAppSettings: () -> Unit
- ) {
+) {
     val context = LocalContext.current
 
     val db = remember { FirebaseFirestore.getInstance() }
@@ -1769,6 +2275,7 @@ fun MyPageScreen(
             postsLoading = false
         }
     }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1930,7 +2437,7 @@ fun MyPageScreen(
                         ) { },
                     shape = RoundedCornerShape(24.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
                 ) {
                     Column(
                         modifier = Modifier.padding(20.dp)
@@ -1978,7 +2485,7 @@ fun MyPageScreen(
                                     onClick = {
                                         showMenu = false
                                         onOpenProfileSettings()
-                                     }
+                                    }
                                 )
                                 MenuPopupButton(
                                     icon = {
@@ -1990,8 +2497,8 @@ fun MyPageScreen(
                                     },
                                     title = "로그아웃",
                                     onClick = {
-                                            showMenu = false
-                                            logoutAll(context, provider) { onLogout() }
+                                        showMenu = false
+                                        logoutAll(context, provider) { onLogout() }
                                     }
                                 )
 
@@ -2007,7 +2514,7 @@ fun MyPageScreen(
                                     onClick = {
                                         showMenu = false
                                         onOpenAppSettings()
-                                     }
+                                    }
                                 )
                             }
 
@@ -2018,7 +2525,6 @@ fun MyPageScreen(
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileEditScreen(
@@ -2075,7 +2581,7 @@ private fun ProfileEditScreen(
             val birthParts = birthDateText?.split("-")
             birthYear = birthParts?.getOrNull(0)?.toIntOrNull()
                 ?: doc.getLong("birthYear")?.toInt()
-                ?: birthYear
+                        ?: birthYear
             birthMonth = birthParts?.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 12) ?: birthMonth
             val maxDay = daysInMonth(birthYear, birthMonth)
             birthDay = (birthParts?.getOrNull(2)?.toIntOrNull() ?: birthDay).coerceIn(1, maxDay)
@@ -2572,6 +3078,7 @@ private fun SettingsScreen(
     val healthConnectManager = remember { HealthConnectManager(context) }
     var isConnected by remember { mutableStateOf(false) }
     var showDisconnectDialog by remember { mutableStateOf(false) }
+
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { granted ->
@@ -2634,7 +3141,6 @@ private fun SettingsScreen(
                                     }
                                     context.startActivity(intent)
                                 }
-
                                 HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
                                     Toast.makeText(
                                         context,
@@ -2643,7 +3149,6 @@ private fun SettingsScreen(
                                     )
                                         .show()
                                 }
-
                                 else -> {
                                     coroutineScope.launch {
                                         if (healthConnectManager.hasAllPermissions()) {
@@ -2674,6 +3179,7 @@ private fun SettingsScreen(
                     modifier = Modifier.padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 아이콘 섹션 (기존 해결 방식처럼 Icons.Default.Watch가 없으면 Watch 대신 다른 아이트 사용)
                     Box(
                         modifier = Modifier
                             .size(48.dp)
@@ -3076,6 +3582,7 @@ fun calcCalories(distanceM: Double, weightKg: Double = 70.0): Double {
 private fun HistoryList(
     padding: PaddingValues,
     runs: List<RunSummaryRef>,
+    isLoading: Boolean = false,
     userName: String?,
     onBack: () -> Unit = {},
     onSelect: (RunSummaryRef) -> Unit = {},
@@ -3089,609 +3596,699 @@ private fun HistoryList(
     var uploadTarget by remember { mutableStateOf<RunSummaryRef?>(null) }
     var uploadTitle by remember { mutableStateOf("") }
     var uploadVisibility by remember { mutableStateOf("PUBLIC") }
-    var pendingDelete by remember { mutableStateOf<RunSummaryRef?>(null) }
-    var isUploading by remember { mutableStateOf(false) }
+        var pendingDelete by remember { mutableStateOf<RunSummaryRef?>(null) }
+        var isUploading by remember { mutableStateOf(false) }
 
-    val createResult by viewModel.createResult.collectAsState()
-    val error by viewModel.error.collectAsState()
-    val historyCardColor = Color(0xFFF0F0EE)
+        val createResult by viewModel.createResult.collectAsState()
+        val error by viewModel.error.collectAsState()
+        val historyCardColor = Color(0xFFF0F0EE)
 
-    LaunchedEffect(createResult) {
-        if (createResult != null) {
-            Toast.makeText(context, "✅ 루트 업로드 성공! id=${createResult}", Toast.LENGTH_SHORT).show()
-            // 필요하면 여기서 createResult 초기화 메서드 만들어서 초기화해도 됨
-            showUploadDialog = false
-            uploadTarget = null
+        LaunchedEffect(createResult) {
+            if (createResult != null) {
+                Toast.makeText(context, "✅ 루트 업로드 성공! id=${createResult}", Toast.LENGTH_SHORT).show()
+                // 필요하면 여기서 createResult 초기화 메서드 만들어서 초기화해도 됨
+                showUploadDialog = false
+                uploadTarget = null
+            }
         }
-    }
 
-    LaunchedEffect(error) {
-        if (error != null) {
-            Toast.makeText(context, "❌ 업로드 실패: $error", Toast.LENGTH_SHORT).show()
+        LaunchedEffect(error) {
+            if (error != null) {
+                Toast.makeText(context, "❌ 업로드 실패: $error", Toast.LENGTH_SHORT).show()
+            }
         }
-    }
 
-    Column(
-        Modifier.fillMaxSize().padding(padding).padding(12.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(12.dp)
         ) {
-            Button(
-                onClick = onBack,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF204996),
-                    contentColor = Color(0xFFFAFAF8)
-                )
-            ) { Text("← 뒤로") }
-            Text("러닝 기록", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Spacer(Modifier.width(1.dp))
-        }
-        Spacer(Modifier.height(12.dp))
-
-        val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
-        val totalDurationMs = runs.sumOf { it.durationMs }
-        val totalCalories = runs.sumOf { calcCalories(it.distanceM) }
-
-        if (runs.isNotEmpty()) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                colors = CardDefaults.cardColors(containerColor = historyCardColor),
-                elevation = CardDefaults.cardElevation(2.dp)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Text("요약", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(4.dp))
-                    Text("총 러닝 횟수: ${runs.size}회")
-                    Text("총 거리: ${"%.1f".format(totalDistanceKm)} km")
-                    Text("총 시간: ${formatDuration(totalDurationMs)}")
-                    Text("총 소모 칼로리: ${"%.0f".format(totalCalories)} kcal")
-                }
-            }
-        }
-
-        if (runs.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "아직 저장된 러닝 기록이 없어요.\n첫 러닝을 시작해 보세요!",
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(runs.size) { idx ->
-                    val r = runs[idx]
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(r) },
-                        colors = CardDefaults.cardColors(containerColor = historyCardColor),
-                        elevation = CardDefaults.cardElevation(2.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.align(Alignment.TopStart)
-                            ) {
-                                val distanceKm = r.distanceM / 1000.0
-                                val pace =
-                                    calcPace(r.distanceM, r.durationMs)?.let { formatPace(it) }
-                                        ?: "--"
-
-                                Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(4.dp))
-                                Text("거리 ${"%.1f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
-                            }
-                            Row(
-                                modifier = Modifier.align(Alignment.BottomEnd),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = "공유",
-                                    color = Color(0xFF1E88E5),
-                                    modifier = Modifier.clickable {
-                                        // 업로드 대상 선택 + 다이얼로그 열기
-                                        uploadTarget = r
-                                        uploadTitle = r.titleOrDefault(userName)
-                                        uploadVisibility = "PUBLIC"
-                                        showUploadDialog = true
-                                    }
-                                )
-                                Text(
-                                    text = "삭제",
-                                    color = Color.Red,
-                                    modifier = Modifier.clickable { pendingDelete = r }
-                                )
-                            }
-
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (showUploadDialog && uploadTarget != null) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showUploadDialog = false },
-            containerColor = DialogContainer,
-            titleContentColor = DialogTitle,
-            textContentColor = DialogText,
-            title = { Text("루트 업로드") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = uploadTitle,
-                        onValueChange = { uploadTitle = it },
-                        label = { Text("루트 제목") },
-                        modifier = Modifier.fillMaxWidth()
+                Button(
+                    onClick = onBack,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF204996),
+                        contentColor = Color(0xFFFAFAF8)
                     )
-                    Spacer(Modifier.height(12.dp))
-
-                    Text("공개 범위", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            text = if (uploadVisibility == "PUBLIC") "✅ 공개" else "공개",
-                            modifier = Modifier.clickable { uploadVisibility = "PUBLIC" }
-                        )
-                        Text(
-                            text = if (uploadVisibility == "PRIVATE") "✅ 비공개" else "비공개",
-                            modifier = Modifier.clickable { uploadVisibility = "PRIVATE" }
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (isUploading) return@Button
-                    val target = uploadTarget ?: return@Button
-
-                    // 1) 로컬 파일에서 경로 읽기
-                    val pairs = loadRunPathFile(context, target.fileName)
-                    if (pairs.size < 2) {
-                        Toast.makeText(context, "경로가 없어서 업로드할 수 없어요.", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-
-                    // 2) points 만들기
-                    val points = pairs.mapIndexed { idx, p ->
-                        com.example.runningspot.data.remote.RoutePointDto(
-                            seq = idx,
-                            lat = p.first,
-                            lng = p.second
-                        )
-                    }
-
-                    val start = pairs.first()
-                    val end = pairs.last()
-
-                    // 3) CreateRouteRequest 구성
-                    val body = com.example.runningspot.data.remote.CreateRouteRequest(
-                        title = uploadTitle.ifBlank { target.titleOrDefault(userName) },
-                        distance_m = target.distanceM,
-                        start_lat = start.first,
-                        start_lng = start.second,
-                        end_lat = end.first,
-                        end_lng = end.second,
-                        visibility = uploadVisibility,
-                        points = points
-                    )
-
-                    // 4) 서버 업로드 호출
-                    isUploading = true
-                    viewModel.createRoute(body)
-                }, enabled = !isUploading) { Text(if (isUploading) "업로드 중..." else "업로드") }
-            },
-            dismissButton = {
-                Button(onClick = { showUploadDialog = false }) { Text("취소") }
+                ) { Text("← 뒤로") }
+                Text("러닝 기록", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Spacer(Modifier.width(1.dp))
             }
-        )
-    }
-
-    LaunchedEffect(createResult, error) {
-        if (createResult != null || error != null) {
-            isUploading = false
-        }
-    }
-
-    if (pendingDelete != null) {
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            containerColor = DialogContainer,
-            titleContentColor = DialogTitle,
-            textContentColor = DialogText,
-            title = { Text("삭제 확인") },
-            text = { Text("삭제하시겠습니까?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val target = pendingDelete ?: return@TextButton
-                    pendingDelete = null
-                    onDelete(target)
-                }) { Text("삭제") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("취소") }
-            }
-        )
-    }
-
-    if (isUploading) {
-        AlertDialog(
-            onDismissRequest = {},
-            containerColor = DialogContainer,
-            titleContentColor = DialogTitle,
-            textContentColor = DialogText,
-            confirmButton = {},
-            title = { Text("처리 중") },
-            text = {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                    Text("루트를 업로드하고 있어요")
-                }
-            }
-        )
-    }
-}
-private fun RunSummaryRef.titleOrDefault(userName: String?): String {
-    val safeName = userName?.takeIf { it.isNotBlank() } ?: "사용자"
-    return "${safeName}의 러닝 루트 ${formatDate(endAt)}"
-}
-
-private fun formatDate(ms: Long): String {
-    val sdf = java.text.SimpleDateFormat("yyyy.MM.dd HH:mm", java.util.Locale.getDefault())
-    return sdf.format(java.util.Date(ms))
-}
-
-@Composable
-private fun WeeklyStatsScreen(
-    padding: PaddingValues,
-    runs: List<RunSummaryRef>
-) {
-    val auth = remember { FirebaseAuth.getInstance() }
-    val db = remember { FirebaseFirestore.getInstance() }
-    val uid = auth.currentUser?.uid
-    var dailyGoalKm by remember { mutableStateOf(0.0) }
-
-    LaunchedEffect(uid) {
-        if (uid == null) return@LaunchedEffect
-        runCatching {
-            val doc = db.collection("users").document(uid).get().await()
-            dailyGoalKm = doc.getDouble("dailyGoalKm") ?: 0.0
-        }
-    }
-
-    val now = System.currentTimeMillis()
-    val dayMs = 24L * 60L * 60L * 1000L
-    val oneWeekAgo = now - 6L * dayMs
-
-    val cal = java.util.Calendar.getInstance()
-    // 캘린더: 하루 단위로 자르기
-    fun normalizeToDayStart(timeMs: Long): Long {
-        cal.timeInMillis = timeMs
-        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
-        cal.set(java.util.Calendar.MINUTE, 0)
-        cal.set(java.util.Calendar.SECOND, 0)
-        cal.set(java.util.Calendar.MILLISECOND, 0)
-        return cal.timeInMillis
-    }
-
-    // 최근 1주일만 필터
-    val weekRuns = runs.filter { it.endAt >= oneWeekAgo }
-
-    // 날짜별 총 거리(km)
-    val groupedByDayKm: Map<Long, Double> = weekRuns
-        .groupBy { normalizeToDayStart(it.endAt) }
-        .mapValues { (_, list) -> list.sumOf { it.distanceM } / 1000.0 }
-
-    // 날짜별 총 시간(ms)
-    val groupedByDayDuration: Map<Long, Long> = weekRuns
-        .groupBy { normalizeToDayStart(it.endAt) }
-        .mapValues { (_, list) -> list.sumOf { it.durationMs } }
-
-    val dateFormat = java.text.SimpleDateFormat("MM/dd", java.util.Locale.getDefault())
-
-    data class DayStat(
-        val dayStartMs: Long,
-        val label: String,
-        val valueKm: Double,
-        val kcal: Double,
-        val durationMs: Long
-    )
-
-    // 최근 7일(과거→오늘 순) 리스트
-    val days: List<DayStat> = (0..6).map { offset ->
-        val dayStart = normalizeToDayStart(oneWeekAgo + offset * dayMs)
-
-        val km = groupedByDayKm[dayStart] ?: 0.0
-        val durationMs = groupedByDayDuration[dayStart] ?: 0L
-        val kcal = if (km > 0.0) calcCalories(km * 1000.0) else 0.0
-
-        DayStat(
-            dayStartMs = dayStart,
-            label = dateFormat.format(java.util.Date(dayStart)),
-            valueKm = km,
-            kcal = kcal,
-            durationMs = durationMs
-        )
-    }
-
-    val maxValueKm = days.maxOfOrNull { it.valueKm } ?: 0.0
-    val chartMaxKm = maxOf(maxValueKm, dailyGoalKm)
-
-    val totalDistanceAllM = runs.sumOf { it.distanceM }
-    val totalKm = totalDistanceAllM / 1000.0
-    val totalDurationMs = runs.sumOf { it.durationMs }
-    val totalKcal = runs.sumOf { calcCalories(it.distanceM) }
-    val totalRuns = runs.size
-    val avgPaceText = calcPace(totalDistanceAllM, totalDurationMs)?.let { formatPace(it) } ?: "-"
-    val todayDistanceKm = days.lastOrNull()?.valueKm ?: 0.0
-    val achievedTodayGoal = dailyGoalKm > 0.0 && todayDistanceKm >= dailyGoalKm
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text("최근 1주일 러닝 기록", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-
-        if (maxValueKm <= 0.0) {
-            // 최근 1주일 기록 없음
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "최근 1주일 동안 저장된 러닝 기록이 없어요.\n러닝을 시작하고 다시 확인해 보세요!",
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
-        } else {
-            // 막대 그래프 (거리 기준)
-            androidx.compose.foundation.Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-            ) {
-                val barCount = days.size
-                val maxVal = chartMaxKm.toFloat().coerceAtLeast(0.1f)
-
-                val barWidth = size.width / (barCount * 1.7f)
-                val barSpace = barWidth * 0.8f
-                val chartHeight = size.height * 0.8f
-
-                days.forEachIndexed { index, day ->
-                    val value = day.valueKm.toFloat()
-                    if (value <= 0f) return@forEachIndexed
-
-                    val ratio = value / maxVal
-                    val barHeight = chartHeight * ratio
-
-                    val xCenter = barWidth / 2f +
-                            index * (barWidth + barSpace)
-                    val top = size.height - barHeight
-
-                    val barColor = if (dailyGoalKm > 0.0 && day.valueKm < dailyGoalKm) {
-                        Color(0xFFE98B72)
-                    } else {
-                        Color(0xFF8BCF74)
-                    }
-
-                    drawRect(
-                        color = barColor,
-                        topLeft = androidx.compose.ui.geometry.Offset(
-                            xCenter - barWidth / 2f,
-                            top
-                        ),
-                        size = androidx.compose.ui.geometry.Size(
-                            barWidth,
-                            barHeight
-                        )
-                    )
-                }
-
-                if (dailyGoalKm > 0.0) {
-                    val goalRatio = (dailyGoalKm.toFloat() / maxVal).coerceIn(0f, 1f)
-                    val goalY = size.height - (chartHeight * goalRatio)
-                    drawLine(
-                        color = Color(0xFFB455C6),
-                        start = androidx.compose.ui.geometry.Offset(0f, goalY),
-                        end = androidx.compose.ui.geometry.Offset(size.width, goalY),
-                        strokeWidth = 4f
-                    )
-                }
-            }
-
             Spacer(Modifier.height(12.dp))
 
-            // x축 라벨 (날짜 + km + kcal + 시간)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                days.forEach { day ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(day.label, fontSize = 11.sp)
+            val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
+            val totalDurationMs = runs.sumOf { it.durationMs }
+            val totalCalories = runs.sumOf { calcCalories(it.distanceM) }
 
-                        if (day.valueKm > 0.0) {
-                            Text(
-                                "%.1f km".format(day.valueKm),
-                                fontSize = 10.sp,
-                                color = Color(0xFF1A1A1A)
-                            )
-                            Text(
-                                formatDuration(day.durationMs),
-                                fontSize = 10.sp,
-                                color = Color(0xFF1A1A1A)
-                            )
-                            Text(
-                                "%.0f kcal".format(day.kcal),
-                                fontSize = 10.sp,
-                                color = Color(0xFF1A1A1A)
-                            )
+            if (runs.isNotEmpty()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text("요약", fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("총 러닝 횟수: ${runs.size}회")
+                        Text("총 거리: ${"%.1f".format(totalDistanceKm)} km")
+                        Text("총 시간: ${formatDuration(totalDurationMs)}")
+                        Text("총 소모 칼로리: ${"%.0f".format(totalCalories)} kcal")
+                    }
+                }
+            }
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else if (runs.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "아직 저장된 러닝 기록이 없어요.\n첫 러닝을 시작해 보세요!",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(runs.size) { idx ->
+                        val r = runs[idx]
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(r) },
+                            colors = CardDefaults.cardColors(containerColor = historyCardColor),
+                            elevation = CardDefaults.cardElevation(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.align(Alignment.TopStart)
+                                ) {
+                                    val distanceKm = r.distanceM / 1000.0
+                                    val pace =
+                                        calcPace(r.distanceM, r.durationMs)?.let { formatPace(it) }
+                                            ?: "--"
+
+                                    Text(text = formatDate(r.endAt), fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("거리 ${"%.1f".format(distanceKm)} km · 시간 ${formatDuration(r.durationMs)} · 페이스 $pace")
+                                }
+                                Row(
+                                    modifier = Modifier.align(Alignment.BottomEnd),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = "공유",
+                                        color = Color(0xFF1E88E5),
+                                        modifier = Modifier.clickable {
+                                            // 업로드 대상 선택 + 다이얼로그 열기
+                                            uploadTarget = r
+                                            uploadTitle = r.titleOrDefault(userName)
+                                            uploadVisibility = "PUBLIC"
+                                            showUploadDialog = true
+                                        }
+                                    )
+                                    Text(
+                                        text = "삭제",
+                                        color = Color.Red,
+                                        modifier = Modifier.clickable { pendingDelete = r }
+                                    )
+                                }
+
+                            }
                         }
                     }
                 }
             }
         }
+        if (showUploadDialog && uploadTarget != null) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showUploadDialog = false },
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                title = { Text("루트 업로드") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = uploadTitle,
+                            onValueChange = { uploadTitle = it },
+                            label = { Text("루트 제목") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(24.dp))
+                        Text("공개 범위", fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                text = if (uploadVisibility == "PUBLIC") "✅ 공개" else "공개",
+                                modifier = Modifier.clickable { uploadVisibility = "PUBLIC" }
+                            )
+                            Text(
+                                text = if (uploadVisibility == "PRIVATE") "✅ 비공개" else "비공개",
+                                modifier = Modifier.clickable { uploadVisibility = "PRIVATE" }
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (isUploading) return@Button
+                        val target = uploadTarget ?: return@Button
 
-        Text(
-            text = if (achievedTodayGoal) "목표 수치 달성!" else "오늘도 달려볼까요?",
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 28.sp,
-            color = Color(0xFF1A1A1A)
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = if (dailyGoalKm > 0.0) {
-                "오늘 ${"%.1f".format(todayDistanceKm)}km / 목표 ${"%.1f".format(dailyGoalKm)}km"
-            } else {
-                "프로필에서 일일 목표를 설정해 보세요"
-            },
-            color = Color(0xFF2A2A2A)
-        )
-        Spacer(Modifier.height(14.dp))
+                        // 1) 서버에서 가져온 기록 경로 사용
+                        val pairs = target.pathPairs
+                        if (pairs.size < 2) {
+                            Toast.makeText(context, "경로가 없어서 업로드할 수 없어요.", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SummaryCardTile(
-                modifier = Modifier.weight(1f),
-                title = "러닝 횟수",
-                value = "${totalRuns}회"
-            )
-            SummaryCardTile(
-                modifier = Modifier.weight(1f),
-                title = "총 러닝 거리",
-                value = "${"%.1f".format(totalKm)} km"
+                        // 2) points 만들기
+                        val points = pairs.mapIndexed { idx, p ->
+                            com.example.runningspot.data.remote.RoutePointDto(
+                                seq = idx,
+                                lat = p.first,
+                                lng = p.second
+                            )
+                        }
+
+                        val start = pairs.first()
+                        val end = pairs.last()
+
+                        // 3) CreateRouteRequest 구성
+                        val body = com.example.runningspot.data.remote.CreateRouteRequest(
+                            title = uploadTitle.ifBlank { target.titleOrDefault(userName) },
+                            distance_m = target.distanceM,
+                            start_lat = start.first,
+                            start_lng = start.second,
+                            end_lat = end.first,
+                            end_lng = end.second,
+                            visibility = uploadVisibility,
+                            points = points,
+                            wearable_steps = target.wearableSteps,
+                            wearable_heart_rate = target.wearableHeartRate,
+                            wearable_calories = target.wearableCalories
+                        )
+
+                        // 4) 서버 업로드 호출
+                        isUploading = true
+                        viewModel.createRoute(body)
+                    }, enabled = !isUploading) { Text(if (isUploading) "업로드 중..." else "업로드") }
+                },
+                dismissButton = {
+                    Button(onClick = { showUploadDialog = false }) { Text("취소") }
+                }
             )
         }
-        Spacer(Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SummaryCardTile(
-                modifier = Modifier.weight(1f),
-                title = "총 러닝 시간",
-                value = formatDuration(totalDurationMs)
-            )
-            SummaryCardTile(
-                modifier = Modifier.weight(1f),
-                title = "총 소모 칼로리",
-                value = "${"%.0f".format(totalKcal)} kcal"
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        SummaryCardTile(
-            modifier = Modifier.fillMaxWidth(),
-            title = "평균 페이스",
-            value = avgPaceText
-        )
-        Spacer(Modifier.height(14.dp))
-
-        Text("헬스 연동 데이터", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-
-        val context = LocalContext.current
-        val healthConnectManager = remember { com.example.runningspot.HealthConnect.HealthConnectManager(context) }
-        var isWearableConnected by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            if (healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
-                isWearableConnected = healthConnectManager.hasAllPermissions()
+        LaunchedEffect(createResult, error) {
+            if (createResult != null || error != null) {
+                isUploading = false
             }
         }
-        // 총 걸음 수 합산
-        val totalWearableSteps = runs.sumOf { it.wearableSteps }
 
-        // 총 워치 소모 칼로리 합산
-        val totalWearableCalories = runs.sumOf { it.wearableCalories }
+        if (pendingDelete != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                title = { Text("삭제 확인") },
+                text = { Text("삭제하시겠습니까?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val target = pendingDelete ?: return@TextButton
+                        pendingDelete = null
+                        onDelete(target)
+                    }) { Text("삭제") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) { Text("취소") }
+                }
+            )
+        }
 
-        // 평균 심박수 계산 (0이 아닌 유효한 데이터만 모아서 평균 내기)
-        val validHeartRates = runs.map { it.wearableHeartRate }.filter { it > 0L }
-        val avgHeartRate = if (validHeartRates.isNotEmpty()) validHeartRates.average().toInt() else 0
+        if (isUploading) {
+            AlertDialog(
+                onDismissRequest = {},
+                containerColor = DialogContainer,
+                titleContentColor = DialogTitle,
+                textContentColor = DialogText,
+                confirmButton = {},
+                title = { Text("처리 중") },
+                text = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        Text("루트를 업로드하고 있어요")
+                    }
+                }
+            )
+        }
+    }
+    private fun RunSummaryRef.titleOrDefault(userName: String?): String {
+        val safeName = userName?.takeIf { it.isNotBlank() } ?: "사용자"
+        return "${safeName}의 러닝 루트 ${formatDate(endAt)}"
+    }
 
-        if (isWearableConnected) {
+    private fun formatDate(ms: Long): String {
+        val sdf = java.text.SimpleDateFormat("yyyy.MM.dd HH:mm", java.util.Locale.getDefault())
+        return sdf.format(java.util.Date(ms))
+    }
+
+    @Composable
+    private fun WeeklyStatsScreen(
+        padding: PaddingValues,
+        runs: List<RunSummaryRef>
+    ) {
+        val auth = remember { FirebaseAuth.getInstance() }
+        val db = remember { FirebaseFirestore.getInstance() }
+        val uid = auth.currentUser?.uid
+        var dailyGoalKm by remember { mutableStateOf(0.0) }
+
+        LaunchedEffect(uid) {
+            if (uid == null) return@LaunchedEffect
+            runCatching {
+                val doc = db.collection("users").document(uid).get().await()
+                dailyGoalKm = doc.getDouble("dailyGoalKm") ?: 0.0
+            }
+        }
+
+        val now = System.currentTimeMillis()
+        val dayMs = 24L * 60L * 60L * 1000L
+        val oneWeekAgo = now - 6L * dayMs
+
+        val cal = java.util.Calendar.getInstance()
+        // 캘린더: 하루 단위로 자르기
+        fun normalizeToDayStart(timeMs: Long): Long {
+            cal.timeInMillis = timeMs
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            return cal.timeInMillis
+        }
+
+        // 최근 1주일만 필터
+        val weekRuns = runs.filter { it.endAt >= oneWeekAgo }
+
+        // 날짜별 총 거리(km)
+        val groupedByDayKm: Map<Long, Double> = weekRuns
+            .groupBy { normalizeToDayStart(it.endAt) }
+            .mapValues { (_, list) -> list.sumOf { it.distanceM } / 1000.0 }
+
+        // 날짜별 총 시간(ms)
+        val groupedByDayDuration: Map<Long, Long> = weekRuns
+            .groupBy { normalizeToDayStart(it.endAt) }
+            .mapValues { (_, list) -> list.sumOf { it.durationMs } }
+
+        val dateFormat = java.text.SimpleDateFormat("MM/dd", java.util.Locale.getDefault())
+
+        data class DayStat(
+            val dayStartMs: Long,
+            val label: String,
+            val valueKm: Double,
+            val kcal: Double,
+            val durationMs: Long
+        )
+
+        // 최근 7일(과거→오늘 순) 리스트
+        val days: List<DayStat> = (0..6).map { offset ->
+            val dayStart = normalizeToDayStart(oneWeekAgo + offset * dayMs)
+
+            val km = groupedByDayKm[dayStart] ?: 0.0
+            val durationMs = groupedByDayDuration[dayStart] ?: 0L
+            val kcal = if (km > 0.0) calcCalories(km * 1000.0) else 0.0
+
+            DayStat(
+                dayStartMs = dayStart,
+                label = dateFormat.format(java.util.Date(dayStart)),
+                valueKm = km,
+                kcal = kcal,
+                durationMs = durationMs
+            )
+        }
+
+        val maxValueKm = days.maxOfOrNull { it.valueKm } ?: 0.0
+        val chartMaxKm = maxOf(maxValueKm, dailyGoalKm)
+
+        val totalDistanceAllM = runs.sumOf { it.distanceM }
+        val totalKm = totalDistanceAllM / 1000.0
+        val totalDurationMs = runs.sumOf { it.durationMs }
+        val totalKcal = runs.sumOf { calcCalories(it.distanceM) }
+        val totalRuns = runs.size
+        val avgPaceText = calcPace(totalDistanceAllM, totalDurationMs)?.let { formatPace(it) } ?: "-"
+        val todayDistanceKm = days.lastOrNull()?.valueKm ?: 0.0
+        val achievedTodayGoal = dailyGoalKm > 0.0 && todayDistanceKm >= dailyGoalKm
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text("최근 1주일 러닝 기록", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+
+            if (maxValueKm <= 0.0) {
+                // 최근 1주일 기록 없음
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "최근 1주일 동안 저장된 러닝 기록이 없어요.\n러닝을 시작하고 다시 확인해 보세요!",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                // 막대 그래프 (거리 기준)
+                androidx.compose.foundation.Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                ) {
+                    val barCount = days.size
+                    val maxVal = chartMaxKm.toFloat().coerceAtLeast(0.1f)
+
+                    val barWidth = size.width / (barCount * 1.7f)
+                    val barSpace = barWidth * 0.8f
+                    val chartHeight = size.height * 0.8f
+
+                    days.forEachIndexed { index, day ->
+                        val value = day.valueKm.toFloat()
+                        if (value <= 0f) return@forEachIndexed
+
+                        val ratio = value / maxVal
+                        val barHeight = chartHeight * ratio
+
+                        val xCenter = barWidth / 2f +
+                                index * (barWidth + barSpace)
+                        val top = size.height - barHeight
+                        val barColor = if (dailyGoalKm > 0.0 && day.valueKm < dailyGoalKm) {
+                            Color(0xFFE98B72)
+                        } else {
+                            Color(0xFF8BCF74)
+                        }
+
+                        drawRect(
+                            color = barColor,
+                            topLeft = androidx.compose.ui.geometry.Offset(
+                                xCenter - barWidth / 2f,
+                                top
+                            ),
+                            size = androidx.compose.ui.geometry.Size(
+                                barWidth,
+                                barHeight
+                            )
+                        )
+                    }
+
+                    if (dailyGoalKm > 0.0) {
+                        val goalRatio = (dailyGoalKm.toFloat() / maxVal).coerceIn(0f, 1f)
+                        val goalY = size.height - (chartHeight * goalRatio)
+                        drawLine(
+                            color = Color(0xFFB455C6),
+                            start = androidx.compose.ui.geometry.Offset(0f, goalY),
+                            end = androidx.compose.ui.geometry.Offset(size.width, goalY),
+                            strokeWidth = 4f
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // x축 라벨 (날짜 + km + kcal + 시간)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    days.forEach { day ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(day.label, fontSize = 11.sp)
+
+                            if (day.valueKm > 0.0) {
+                                Text(
+                                    "%.1f km".format(day.valueKm),
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF1A1A1A)
+                                )
+                                Text(
+                                    formatDuration(day.durationMs),
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF1A1A1A)
+                                )
+                                Text(
+                                    "%.0f kcal".format(day.kcal),
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF1A1A1A)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // 요약 정보
+            Text(
+                text = if (achievedTodayGoal) "목표 수치 달성!" else "오늘도 달려볼까요?",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 28.sp,
+                color = Color(0xFF1A1A1A)
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (dailyGoalKm > 0.0) {
+                    "오늘 ${"%.1f".format(todayDistanceKm)}km / 목표 ${"%.1f".format(dailyGoalKm)}km"
+                } else {
+                    "프로필에서 일일 목표를 설정해 보세요"
+                },
+                color = Color(0xFF2A2A2A)
+            )
+            Spacer(Modifier.height(14.dp))
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SummaryCardTile(
                     modifier = Modifier.weight(1f),
-                    title = "러닝 총 걸음 수", // 통계창에 맞게 텍스트 수정
-                    value = "${totalWearableSteps}보"
+                    title = "러닝 횟수",
+                    value = "${totalRuns}회"
                 )
                 SummaryCardTile(
                     modifier = Modifier.weight(1f),
-                    title = "평균 심박수", // 통계창에 맞게 텍스트 수정
-                    value = if (avgHeartRate > 0) "${avgHeartRate} bpm" else "-"
+                    title = "총 러닝 거리",
+                    value = "${"%.1f".format(totalKm)} km"
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SummaryCardTile(
+                    modifier = Modifier.weight(1f),
+                    title = "총 러닝 시간",
+                    value = formatDuration(totalDurationMs)
+                )
+                SummaryCardTile(
+                    modifier = Modifier.weight(1f),
+                    title = "총 소모 칼로리",
+                    value = "${"%.0f".format(totalKcal)} kcal"
                 )
             }
             Spacer(Modifier.height(12.dp))
             SummaryCardTile(
                 modifier = Modifier.fillMaxWidth(),
-                title = "측정 소모 칼로리",
-                value = "${"%.0f".format(totalWearableCalories)} kcal"
+                title = "평균 페이스",
+                value = avgPaceText
             )
-        } else {
-            androidx.compose.material3.Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
-                elevation = androidx.compose.material3.CardDefaults.cardElevation(0.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    androidx.compose.material3.Icon(
-                        androidx.compose.material.icons.Icons.Default.Watch,
-                        contentDescription = null,
-                        tint = Color.Gray
+            Spacer(Modifier.height(14.dp))
+
+            Text("헬스 연동 데이터", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+
+            val context = LocalContext.current
+            val healthConnectManager = remember { com.example.runningspot.HealthConnect.HealthConnectManager(context) }
+            var isWearableConnected by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                if (healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE) {
+                    isWearableConnected = healthConnectManager.hasAllPermissions()
+                }
+            }
+            val totalWearableSteps = runs.sumOf { it.wearableSteps }
+
+            // 총 워치 소모 칼로리 합산
+            val totalWearableCalories = runs.sumOf { it.wearableCalories }
+
+            // 평균 심박수 계산 (0이 아닌 유효한 데이터만 모아서 평균 내기)
+            val validHeartRates = runs.map { it.wearableHeartRate }.filter { it > 0L }
+            val avgHeartRate = if (validHeartRates.isNotEmpty()) validHeartRates.average().toInt() else 0
+
+            if (isWearableConnected) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SummaryCardTile(
+                        modifier = Modifier.weight(1f),
+                        title = "러닝 총 걸음 수", // 통계창에 맞게 텍스트 수정
+                        value = "${totalWearableSteps}보"
                     )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("웨어러블 기기 미연결", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("환경설정에서 기기를 연결하고\n더 정확한 심박수와 걸음 수를 확인하세요.", fontSize = 12.sp, color = Color.Gray)
+                    SummaryCardTile(
+                        modifier = Modifier.weight(1f),
+                        title = "평균 심박수", // 통계창에 맞게 텍스트 수정
+                        value = if (avgHeartRate > 0) "${avgHeartRate} bpm" else "-"
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                SummaryCardTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "측정 소모 칼로리",
+                    value = "${"%.0f".format(totalWearableCalories)} kcal"
+                )
+            } else {
+                androidx.compose.material3.Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+                    elevation = androidx.compose.material3.CardDefaults.cardElevation(0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.Icon(
+                            androidx.compose.material.icons.Icons.Default.Watch,
+                            contentDescription = null,
+                            tint = Color.Gray
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text("웨어러블 기기 미연결", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("환경설정에서 기기를 연결하고\n더 정확한 심박수와 걸음 수를 확인하세요.", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+
+    @Composable
+    private fun SummaryCardTile(
+        modifier: Modifier = Modifier,
+        title: String,
+        value: String
+    ) {
+        Card(
+            modifier = modifier,
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
+            elevation = CardDefaults.cardElevation(1.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(title, fontSize = 13.sp, color = Color(0xFF2A2A2A))
+                Spacer(Modifier.height(6.dp))
+                Text(value, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1A1A1A))
+            }
+        }
+    }
+    @Composable
+    private fun SelectedRoutePreviewCard(
+        route: com.example.runningspot.data.remote.RouteDetailDto,
+        onBackToList: () -> Unit,
+        onStartFollowRun: () -> Unit
+    ) {
+        val distanceKm = route.distance_m / 1000.0
+        val estimatedMinutes = ((route.distance_m / 1000.0) * 6.5).toInt().coerceAtLeast(1)
+        val startText = "${"%.5f".format(route.start_lat)}, ${"%.5f".format(route.start_lng)}"
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+        ) {
+            TextButton(
+                onClick = onBackToList,
+                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)
+            ) {
+                Text("← 목록으로")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                ) {
+                    Text(
+                        text = route.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    RouteInfoRow(label = "총 거리", value = "${"%.2f".format(distanceKm)} km")
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    RouteInfoRow(label = "예상 시간", value = "약 ${estimatedMinutes}분")
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    RouteInfoRow(label = "시작 위치", value = startText)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = onStartFollowRun,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("이 루트 따라뛰기")
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(20.dp))
     }
-}
-
-@Composable
-private fun SummaryCardTile(
-    modifier: Modifier = Modifier,
-    title: String,
-    value: String
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
-        elevation = CardDefaults.cardElevation(1.dp),
-        shape = RoundedCornerShape(12.dp)
+    @Composable
+    private fun RouteInfoRow(
+        label: String,
+        value: String
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Text(title, fontSize = 13.sp, color = Color(0xFF2A2A2A))
-            Spacer(Modifier.height(6.dp))
-            Text(value, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF1A1A1A))
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
-}
-

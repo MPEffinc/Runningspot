@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.runningspot.viewmodel.RouteViewModel
+import androidx.compose.material3.MaterialTheme
 
 @Composable
 fun NearbyRoutesSection(
@@ -34,7 +34,6 @@ fun NearbyRoutesSection(
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState()
     val error by viewModel.error.collectAsState()
 
-    // 러닝 화면에서는 외부에서 위치 기반 로드를 제어할 수 있게 옵션화
     LaunchedEffect(autoLoadNearbyOnStart) {
         if (autoLoadNearbyOnStart) {
             viewModel.loadNearbyRoutes(lat = 37.4, lng = 126.6)

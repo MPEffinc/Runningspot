@@ -10,5 +10,4 @@ data class RunHistoryDto(
     val wearable_steps: Long = 0L,
     val wearable_heart_rate: Long = 0L,
     val wearable_calories: Double = 0.0
-
 )

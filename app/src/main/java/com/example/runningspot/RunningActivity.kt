@@ -2,12 +2,11 @@ package com.example.runningspot
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.widget.TextView
 import android.widget.Toast
@@ -37,15 +36,20 @@ import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import kotlin.math.asin
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
+import android.telecom.VideoProfile.isPaused
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -55,13 +59,50 @@ import com.google.android.material.button.MaterialButton
 import com.example.runningspot.ui.getCircularBitmap
 import com.kakao.vectormap.GestureType
 import kotlinx.coroutines.launch
+import android.os.Handler
+import android.os.Looper
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.ImageView
+import android.widget.LinearLayout
+import androidx.compose.ui.graphics.toArgb
+import com.example.runningspot.ui.theme.AppWhite
+import com.example.runningspot.ui.theme.BrandBlue
+import kotlin.jvm.java
 
 
 class RunningActivity : ComponentActivity() {
+    private var expectedRouteMarker: com.kakao.vectormap.label.Label? = null
+    private var userLocationMarker: com.kakao.vectormap.label.Label? = null
+    private val offRouteMarkers = mutableListOf<com.kakao.vectormap.label.Label>()
+    private lateinit var navIcon: android.widget.ImageView
 
-    private var followMode = true
+    private lateinit var txtNavInstruction: TextView
+    private lateinit var txtNavDistance: TextView
+    private lateinit var navBanner: android.widget.LinearLayout
+
+    private var isOffRouteNow = false
+    private val offRouteThresholdM = 25.0
+    private val turnDetectAngleDeg = 28.0
+    private val minTurnDistanceM = 8.0
+    private val lookAheadPoints = 1
+    private val maxAcceptedAccuracyM = 35f
+    private val minRecordGapM = 4.0
+    private val progressBacktrackToleranceM = 25.0
+    private val finishDistanceThresholdM = 12.0
+    private fun calculateRemainingDistance(
+        projectedResult: ProjectedPointResult,
+        route: List<LatLng>
+    ): Double {
+        val total = calculatePathDistance(route)
+        return (total - projectedResult.progressDistanceM).coerceAtLeast(0.0)
+    }
+
+    private var maxReachedRouteIndex = 0
+    private var followMode = false
+    private var followRouteTitle: String = ""
     private var lastKnownLocation: android.location.Location? = null
     private lateinit var gpsBtn: com.google.android.material.button.MaterialButton
+
     // 지도 관련
     private lateinit var mapView: MapView
     private var kakaoMap: KakaoMap? = null
@@ -76,16 +117,19 @@ class RunningActivity : ComponentActivity() {
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
     private var isRunning = false
+
     private var absoluteStartTimeMs = 0L // 헬스 커넥트용 실제 시각
     private lateinit var healthConnectManager: com.example.runningspot.HealthConnect.HealthConnectManager
     private var userMarkerBitmap: Bitmap? = null
     private var isPaused = false
     private var autoFollow = true
+
     // 상단 UI (거리/시간)
     private lateinit var txtPace: TextView
     private lateinit var txtCalories: TextView
     private lateinit var txtTime: TextView
     private lateinit var txtDistance: TextView
+
     private lateinit var txtHeartRate: TextView
     private lateinit var txtSteps: TextView
     private var startTime = 0L
@@ -102,21 +146,98 @@ class RunningActivity : ComponentActivity() {
             }
         }
     }
+    private lateinit var txtFollowTitle: TextView
+    private lateinit var txtRemain: TextView
+    private lateinit var txtDeviation: TextView
+
+    private var guidePoints: List<LatLng> = emptyList()
+    private var guideTotalDistance = 0.0
+    private var offRouteCount = 0
+    private var wasOffRoute = false
+    private var maxGuideProgressDistanceM = 0.0
+    private var hasFinishTriggered = false
+
+    private lateinit var pauseBtn: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        //헬스매니저초기화
+
         healthConnectManager = com.example.runningspot.HealthConnect.HealthConnectManager(this)
         // ✅ 루트 레이아웃 생성
         val root = android.widget.FrameLayout(this)
         mapView = MapView(this)
+        followMode = (intent.getStringExtra("run_mode") == "follow")
+        followRouteId = intent.getLongExtra("follow_route_id", -1L)
+        followRouteTitle = intent.getStringExtra("follow_route_title").orEmpty()
+        navBanner = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(28, 50, 28, 80)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.parseColor("#F0F0EE"))
+                cornerRadius = 24f
+            }
+            elevation = 10f
+            visibility = if (followMode) View.VISIBLE else View.GONE
+        }
+
+        txtNavInstruction = TextView(this).apply {
+            text = "다음 안내: -"
+            setTextColor(Color.parseColor("#2A2A2A"))
+            textSize = 20f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+
+        txtNavDistance = TextView(this).apply {
+            text = "다음 꺾임까지 -"
+            setTextColor(Color.parseColor("#2A2A2A"))
+            textSize = 16f
+        }
+        val textContainer = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        }
+
+        textContainer.addView(txtNavInstruction)
+        textContainer.addView(txtNavDistance)
+        navIcon = android.widget.ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(500, 500).apply {
+                marginStart = 16
+            }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setImageResource(R.drawable.go)
+        }
+
+        val navRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(textContainer)
+            addView(navIcon)
+        }
+        navBanner.addView(navRow)
 
         root.addView(
             mapView,
-            android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
+        )
+
+        root.addView(
+            navBanner,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP
+                topMargin = 90
+                marginStart = 24
+                marginEnd = 24
+            }
         )
         //마커 설
         val userMarkerImageUri = intent.getStringExtra("userMarkerImageUri")
@@ -160,29 +281,80 @@ class RunningActivity : ComponentActivity() {
         val (timeTile, timeValue) = makeStatTile("시간")
         val (kcalTile, kcalValue) = makeStatTile("소모 칼로리")
         val (distTile, distValue) = makeStatTile("러닝 거리")
+        val (remainTile, remainValue) = makeStatTile("남은 거리")
+        val (deviationTile, deviationValue) = makeStatTile("경로 이탈 횟수")
         val (hrTile, hrValue) = makeStatTile("심박수")
         val (stepsTile, stepsValue) = makeStatTile("걸음 수")
-
+        txtRemain = remainValue
+        txtDeviation = deviationValue
         txtPace = paceValue
         txtTime = timeValue
         txtCalories = kcalValue
         txtDistance = distValue
         txtHeartRate = hrValue
         txtSteps = stepsValue
-
+        //첫째줄에 시간, 거리 표시
         val firstRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 14)
-            addView(paceTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 })
-            addView(timeTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 8 })
+            addView(
+                paceTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginEnd = 8 })
+            addView(
+                timeTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginStart = 8 })
         }
+
         val secondRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 14)
-            addView(kcalTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = 8 })
-            addView(distTile, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 8 })
+            addView(
+                kcalTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginEnd = 8 })
+            addView(
+                distTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginStart = 8 })
+        }
+        val threeRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            visibility = if (followMode) View.VISIBLE else View.GONE
+            setPadding(0, 0, 0, 14)
+
+            addView(
+                remainTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginEnd = 8 }
+            )
+            addView(
+                deviationTile,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { marginStart = 8 }
+            )
         }
         val thirdRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
@@ -203,41 +375,67 @@ class RunningActivity : ComponentActivity() {
                 ).apply { marginStart = 8 })
         }
 
+        infoLayout.addView(threeRow)
         infoLayout.addView(firstRow)
         infoLayout.addView(secondRow)
         infoLayout.addView(thirdRow)
 
-        val stopBtn = com.google.android.material.button.MaterialButton(this).apply {
-            text = "러닝 종료"
+        val stopBtn = MaterialButton(this).apply {
+            text = if (followMode) "따라뛰기 종료" else "러닝 종료"
             setBackgroundColor(Color.RED)
             setTextColor(Color.WHITE)
-            setOnClickListener { stopRunningAndFinish() }
+            setOnClickListener {
+                stopRunningAndFinish()
+            }
         }
 
         gpsBtn = MaterialButton(this).apply {
             text = "현재 위치"
             setBackgroundColor(Color.parseColor("#2196F3"))
             setTextColor(Color.WHITE)
+
             visibility = View.VISIBLE
+
             setOnClickListener {
                 recenterToCurrentLocation()
             }
         }
-
-        val pauseBtn = com.google.android.material.button.MaterialButton(this).apply {
+        // 하단 왼쪽 “일시정지/재개” 버튼
+        pauseBtn = MaterialButton(this).apply {
             text = "일시정지"
+
             setBackgroundColor(Color.parseColor("#6E7075"))
             setTextColor(Color.WHITE)
             setOnClickListener { togglePause(this) }
         }
-
         val buttonRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(16, 20, 16, 8)
-            addView(pauseBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(gpsBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(stopBtn, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                pauseBtn,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+            )
+            addView(
+                gpsBtn,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+            )
+            addView(
+                stopBtn,
+                android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+            )
         }
 
         val bottomContainer = android.widget.LinearLayout(this).apply {
@@ -263,7 +461,6 @@ class RunningActivity : ComponentActivity() {
                 )
             )
         }
-
         root.addView(
             bottomContainer,
             android.widget.FrameLayout.LayoutParams(
@@ -330,38 +527,60 @@ class RunningActivity : ComponentActivity() {
                     }
                 }
 
-
+                if (followMode && followRouteId != -1L) {
+                    drawGuideRouteOnce(map, followRouteId)
+                }
                 startRunning()
             }
 
             override fun getPosition(): LatLng = LatLng.from(37.56, 126.97)
             override fun getZoomLevel(): Int = 15
         })
+        handleIndicatorAction(intent.getStringExtra("indicator_action"))
     }
+
+    private fun simplifyRoutePoints(
+        points: List<LatLng>,
+        minGapM: Double = 8.0
+    ): List<LatLng> {
+        if (points.size < 2) return points
+        val result = mutableListOf(points.first())
+        for (i in 1 until points.size) {
+            if (distanceBetween(result.last(), points[i]) >= minGapM) {
+                result.add(points[i])
+            }
+        }
+        if (result.last() != points.last()) {
+            result.add(points.last())
+        }
+        return result
+    }
+
     private fun drawGuideRouteOnce(map: KakaoMap, routeId: Long) {
         lifecycleScope.launch {
             try {
                 val detail = ApiClient.routeApi.getRouteDetail(routeId) // GET /routes/{id}
-
-                val pts = detail.points
-                    .sortedBy { it.seq } // seq 필수
+                val rawPts = detail.points
+                    .sortedBy { it.seq ?: Int.MAX_VALUE }
+                    .distinctBy { "${it.lat},${it.lng}" }
                     .map { LatLng.from(it.lat, it.lng) }
 
+                val pts = simplifyRoutePoints(rawPts)
                 if (pts.size < 2) return@launch
 
+                guidePoints = pts
+                guideTotalDistance = calculatePathDistance(pts)
                 val manager = map.routeLineManager ?: return@launch
                 val layer = manager.layer
-
-                // 이전 가이드 라인 있으면 제거
                 runCatching { guideRoute?.let { layer.remove(it) } }
 
-                // 가이드 라인은 빨강(또는 회색) 추천
-                val style = RouteLineStyle.from(10f, Color.RED)
+                val style = RouteLineStyle.from(10f, Color.parseColor("#2196F3"))
                 val styles = RouteLineStyles.from(style)
                 val seg = RouteLineSegment.from(pts).setStyles(styles)
                 val options = RouteLineOptions.from(seg)
-
                 guideRoute = layer.addRouteLine(options).apply { show() }
+
+                updateExpectedRouteMarker(map, pts.first())
 
                 // (선택) 시작 지점으로 한번 카메라 이동
                 // map.moveCamera(CameraUpdateFactory.newCenterPosition(pts.first()))
@@ -419,10 +638,20 @@ class RunningActivity : ComponentActivity() {
                         ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
                     }
                     if (!matrix.isIdentity)
-                        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                        Bitmap.createBitmap(
+                            decoded,
+                            0,
+                            0,
+                            decoded.width,
+                            decoded.height,
+                            matrix,
+                            true
+                        )
                     else decoded
                 }
-            } catch (_: Exception) { decoded }
+            } catch (_: Exception) {
+                decoded
+            }
 
             // 5) 마커 사이즈 보정
             val target = 200
@@ -488,28 +717,93 @@ class RunningActivity : ComponentActivity() {
     // ✅ 위치 추적 콜백
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+
             if (!isRunning) return
             val map = kakaoMap ?: return
-            val manager = map.routeLineManager ?: return
+            val manager = map.routeLineManager
 
             for (loc in result.locations) {
                 val p = LatLng.from(loc.latitude, loc.longitude)
+                lastKnownLocation = loc
 
-                if (runningPath.isNotEmpty()) {
-                    totalDistance += distanceBetween(runningPath.last(), p)
+                val projectedResult = if (followMode && guidePoints.size >= 2) {
+                    findProjectedPointOnRoute(
+                        current = p,
+                        route = guidePoints,
+                        minProgressDistanceM = maxGuideProgressDistanceM
+                    )
+                } else {
+                    null
                 }
 
-                runningPath.add(p)
-                if (autoFollow) {
-                    moveCameraTo(map, p)
+                val recordPoint = if (followMode && projectedResult != null) {
+                    projectedResult.projected
+                } else {
+                    p
                 }
-                updateMarker(map, p)
-                drawPath(manager)
-                updateUI()
+
+                val shouldRecordPoint = shouldRecordPathPoint(
+                    loc = loc,
+                    currentPoint = recordPoint,
+                    projectedResult = projectedResult
+                )
+
+                if (shouldRecordPoint) {
+                    if (runningPath.isNotEmpty()) {
+                        totalDistance += distanceBetween(runningPath.last(), recordPoint)
+                    }
+                    runningPath.add(recordPoint)
+                    if (!followMode) {
+                        manager?.let { drawPath(it) }
+                    }
+                    updateUI()
+                }
+
+                if (!followMode) {
+                    if (autoFollow) {
+                        moveCameraTo(map, p)
+                    }
+                    updateMarker(map, p)
+                }
+
+                if (projectedResult != null) {
+                    maxGuideProgressDistanceM = max(
+                        maxGuideProgressDistanceM,
+                        projectedResult.progressDistanceM
+                    )
+
+                    val offRouteNow = projectedResult.distanceFromRouteM > offRouteThresholdM
+
+                    val enteredOffRoute = !wasOffRoute && offRouteNow
+                    if (enteredOffRoute) {
+                        offRouteCount += 1
+                        addOffRouteMarker(map, projectedResult.projected)
+                    }
+                    wasOffRoute = offRouteNow
+                    isOffRouteNow = offRouteNow
+
+                    updateExpectedRouteMarker(map, projectedResult.projected)
+                    if (autoFollow) {
+                        moveCameraTo(map, projectedResult.projected)
+                    }
+
+                    val remainingM = calculateRemainingDistance(projectedResult, guidePoints)
+                    val nextTurn = findNextTurn(guidePoints, projectedResult)
+
+                    updateNavigationUi(
+                        remainingM = remainingM,
+                        offRoute = offRouteNow,
+                        nextTurn = nextTurn
+                    )
+
+                    if (shouldAutoFinishFollowRun(remainingM, offRouteNow, p)) {
+                        stopRunningAndFinish(autoCompleted = true)
+                        return
+                    }
+                }
             }
         }
     }
-
 
     // ✅ 거리 계산 (Haversine formula)
     private fun distanceBetween(a: LatLng, b: LatLng): Double {
@@ -521,6 +815,45 @@ class RunningActivity : ComponentActivity() {
                 sin(dLng / 2).pow(2.0)
         return 2 * r * asin(sqrt(sa + sb))
     }
+
+    private fun isBacktrackingOnGuide(projectedResult: ProjectedPointResult): Boolean {
+        return projectedResult.progressDistanceM + progressBacktrackToleranceM < maxGuideProgressDistanceM
+    }
+
+    private fun shouldRecordPathPoint(
+        loc: android.location.Location,
+        currentPoint: LatLng,
+        projectedResult: ProjectedPointResult?
+    ): Boolean {
+        if (loc.hasAccuracy() && loc.accuracy > maxAcceptedAccuracyM) {
+            return false
+        }
+
+        val lastPoint = runningPath.lastOrNull() ?: return true
+        if (distanceBetween(lastPoint, currentPoint) < minRecordGapM) {
+            return false
+        }
+
+        if (projectedResult != null && isBacktrackingOnGuide(projectedResult)) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun shouldAutoFinishFollowRun(
+        remainingM: Double,
+        offRoute: Boolean,
+        currentPoint: LatLng
+    ): Boolean {
+        if (!followMode || hasFinishTriggered || guidePoints.isEmpty() || offRoute) {
+            return false
+        }
+
+        val endDistance = distanceBetween(currentPoint, guidePoints.last())
+        return remainingM <= finishDistanceThresholdM || endDistance <= finishDistanceThresholdM
+    }
+
     fun calcPace(distanceM: Double, durationMs: Long): Double? {
         if (distanceM < 50.0 || durationMs < 30_000L) return null // 정확도 올리기
         val distKm = distanceM / 1000.0
@@ -535,22 +868,31 @@ class RunningActivity : ComponentActivity() {
         return weightKg * distKm * 1.0
     }
 
-    // ✅ UI 갱신
+    // ✅ 상단 UI 갱신
     private fun updateUI() {
         val durationMs = getElapsedDurationMs()
         elapsedTime = durationMs / 1000
         val minutes = elapsedTime / 60
         val seconds = elapsedTime % 60
-        txtTime.text = "%02d:%02d".format(minutes, seconds)
-        txtDistance.text = "%.1f km".format(totalDistance / 1000.0)
+        val timeText = "%02d:%02d".format(minutes, seconds)
+        txtTime.text = timeText
+
+        val distanceText = "%.1f km".format(totalDistance / 1000.0)
+        txtDistance.text = distanceText
         val paceSecondsPerKm = calcPace(totalDistance, durationMs)
-        if (paceSecondsPerKm != null) {
+        val paceText = if (paceSecondsPerKm != null) {
             val paceMin = (paceSecondsPerKm / 60).toInt()
             val paceSec = (paceSecondsPerKm % 60).toInt()
-            txtPace.text = "%d'%02d\"".format(paceMin, paceSec)
+            "%d'%02d\"".format(paceMin, paceSec)
         } else {
-            txtPace.text = "-'--\"" // 데이터 부족
+            "-'--\""
         }
+        txtPace.text = paceText
+        updateRunningIndicator(
+            timeText = timeText,
+            distanceText = distanceText,
+            paceText = paceText
+        )
         if (absoluteStartTimeMs == 0L) {
             txtCalories.text = "%.0f kcal".format(calcCalories(totalDistance))
             return
@@ -581,14 +923,13 @@ class RunningActivity : ComponentActivity() {
                         txtCalories.text = "%.0f kcal".format(fallbackCalories)
                     }
                 } else {
-                    // 헬스 커넥트 권한이 없거나 미연결일 때 기본 칼로리만 보여줌
-
                     val calories = calcCalories(totalDistance)
                     txtCalories.text = "%.0f kcal".format(calories)
                 }
             }
         }
     }
+
     // ✅ 러닝 시작 (지도 로드 완료 후 실행)
     @SuppressLint("MissingPermission")
     private fun startRunning() {
@@ -605,20 +946,37 @@ class RunningActivity : ComponentActivity() {
         }
 
         runningPath.clear()
+        clearRunMarkers()
         totalDistance = 0.0
+        maxReachedRouteIndex = 0
+        maxGuideProgressDistanceM = 0.0
+        offRouteCount = 0
+        wasOffRoute = false
+        hasFinishTriggered = false
         startTime = SystemClock.elapsedRealtime()
         pauseStartedAt = 0L
         accumulatedPauseMs = 0L
         isRunning = true
         isPaused = false
+        startRunningIndicator()
+
         absoluteStartTimeMs = System.currentTimeMillis()
         fused.lastLocation.addOnSuccessListener { loc ->
             kakaoMap?.let { map ->
                 if (loc != null) {
                     val start = LatLng.from(loc.latitude, loc.longitude)
-                    runningPath.add(start)
-                    moveCameraTo(map, start)
-                    updateMarker(map, start)
+                    if (followMode && guidePoints.size >= 2) {
+                        val projectedStart = findProjectedPointOnRoute(start, guidePoints)?.projected
+                        if (projectedStart != null) {
+                            runningPath.add(projectedStart)
+                            moveCameraTo(map, projectedStart)
+                            updateExpectedRouteMarker(map, projectedStart)
+                        }
+                    } else {
+                        runningPath.add(start)
+                        moveCameraTo(map, start)
+                        updateMarker(map, start)
+                    }
                 }
             }
         }
@@ -630,14 +988,50 @@ class RunningActivity : ComponentActivity() {
         Toast.makeText(this, "러닝 시작!", Toast.LENGTH_SHORT).show()
     }
 
+    private fun clearRunMarkers() {
+        val layer = kakaoMap?.labelManager?.layer ?: return
+        runCatching { userLocationMarker?.let { layer.remove(it) } }
+        runCatching { expectedRouteMarker?.let { layer.remove(it) } }
+        offRouteMarkers.forEach { marker ->
+            runCatching { layer.remove(marker) }
+        }
+        userLocationMarker = null
+        expectedRouteMarker = null
+        offRouteMarkers.clear()
+    }
+
     // ✅ 러닝 종료 및 결과 반환
-    private fun stopRunningAndFinish() {
+    private fun stopRunningAndFinish(autoCompleted: Boolean = false) {
+        if (hasFinishTriggered) return
+        hasFinishTriggered = true
+
         val finalDurationMs = getElapsedDurationMs()
         val absoluteEndTimeMs = System.currentTimeMillis() // 헬스 커넥트용 종료 시각
         isRunning = false
         timerHandler.removeCallbacks(timerTicker)
         fused.removeLocationUpdates(locationCallback)
         Toast.makeText(this, "러닝 기록을 정리 중입니다...", Toast.LENGTH_SHORT).show()
+
+        if (followMode && guidePoints.size >= 2) {
+            val current = lastKnownLocation?.let { LatLng.from(it.latitude, it.longitude) }
+            val projectedFinish = current?.let {
+                findProjectedPointOnRoute(
+                    current = it,
+                    route = guidePoints,
+                    minProgressDistanceM = maxGuideProgressDistanceM
+                )
+            }?.projected
+
+            if (projectedFinish != null) {
+                val last = runningPath.lastOrNull()
+                if (last == null || distanceBetween(last, projectedFinish) >= 1.0) {
+                    if (last != null) {
+                        totalDistance += distanceBetween(last, projectedFinish)
+                    }
+                    runningPath.add(projectedFinish)
+                }
+            }
+        }
 
         lifecycleScope.launch {
             // 웨어러블 기기 데이터 동기화 시간 딜레이
@@ -670,10 +1064,48 @@ class RunningActivity : ComponentActivity() {
             intent.putExtra("wearableHeartRate", wearableHeartRate)
             intent.putExtra("wearableCalories", wearableCalories)
             setResult(RESULT_OK, intent)
-
-            Toast.makeText(this@RunningActivity, "러닝 종료!", Toast.LENGTH_SHORT).show()
-            finish()
         }
+        runningPath.forEachIndexed { i, latLng ->
+            intent.putExtra("lat_$i", latLng.latitude)
+            intent.putExtra("lng_$i", latLng.longitude)
+        }
+        val followResultPath = if (followMode && autoCompleted && guidePoints.isNotEmpty()) {
+            guidePoints
+        } else {
+            runningPath
+        }
+        intent.putExtra("followPathSize", followResultPath.size)
+        followResultPath.forEachIndexed { i, latLng ->
+            intent.putExtra("follow_lat_$i", latLng.latitude)
+            intent.putExtra("follow_lng_$i", latLng.longitude)
+        }
+
+        intent.putExtra("followMode", followMode)
+        intent.putExtra("offRouteCount", offRouteCount)
+        intent.putExtra("followRouteTitle", followRouteTitle)
+        intent.putExtra("autoCompleted", autoCompleted)
+        intent.putExtra("followCompleted", autoCompleted)
+        intent.putExtra("completionStatus", if (autoCompleted) "completed" else "stopped")
+
+        if (followMode && guidePoints.isNotEmpty()) {
+            val current = runningPath.lastOrNull()
+            val result = current?.let { calculateFollowProgress(it, guidePoints) }
+            intent.putExtra("followProgressPercent", result?.progressPercent ?: 0)
+        }
+
+        setResult(RESULT_OK, intent)
+
+        Toast.makeText(
+            this,
+            when {
+                followMode && autoCompleted -> "따라뛰기 완료!"
+                followMode -> "따라뛰기 종료!"
+                else -> "러닝 종료!"
+            },
+            Toast.LENGTH_SHORT
+        ).show()
+
+        finish()
     }
 
     // ✅ 지도 관련 함수
@@ -684,14 +1116,14 @@ class RunningActivity : ComponentActivity() {
     private fun updateMarker(map: KakaoMap, p: LatLng) {
         val labelManager = map.labelManager ?: return
         val layer = labelManager.layer ?: return
-        layer.removeAll()
+        runCatching { userLocationMarker?.let { layer.remove(it) } }
 
         val styles = if (userMarkerBitmap != null) {
             LabelStyle.from(userMarkerBitmap)
         } else {
             LabelStyle.from(R.drawable.loc)
         }
-        layer.addLabel(LabelOptions.from(p).setStyles(styles))
+        userLocationMarker = layer.addLabel(LabelOptions.from(p).setStyles(styles))
     }
 
     private fun drawPath(manager: RouteLineManager) {
@@ -708,7 +1140,11 @@ class RunningActivity : ComponentActivity() {
     // 수명주기
     override fun onResume() { super.onResume(); mapView.resume() }
     override fun onPause()  { super.onPause();  mapView.pause() }
-    override fun onDestroy(){ super.onDestroy(); mapView.finish() }
+    override fun onDestroy() {
+        stopRunningIndicator()
+        mapView.finish()
+        super.onDestroy()
+    }
 
     // 권한 결과
     override fun onRequestPermissionsResult(
@@ -721,5 +1157,418 @@ class RunningActivity : ComponentActivity() {
             Toast.makeText(this, "위치 권한이 필요합니다.", Toast.LENGTH_SHORT).show()
             finish()
         }
+    }
+    private fun distanceMeters(
+        lat1: Double,
+        lng1: Double,
+        lat2: Double,
+        lng2: Double
+    ): Double {
+        val result = FloatArray(1)
+        android.location.Location.distanceBetween(lat1, lng1, lat2, lng2, result)
+        return result[0].toDouble()
+    }
+    private fun calculatePathDistance(points: List<LatLng>): Double {
+        if (points.size < 2) return 0.0
+        var total = 0.0
+        for (i in 0 until points.lastIndex) {
+            total += distanceBetween(points[i], points[i + 1])
+        }
+        return total
+    }
+    private data class FollowProgressResult(
+        val progressPercent: Int,
+        val completedM: Double,
+        val remainingM: Double,
+        val distanceFromRouteM: Double
+    )
+    private fun calculateFollowProgress(
+        current: LatLng,
+        route: List<LatLng>
+    ): FollowProgressResult? {
+        if (route.size < 2) return null
+
+        var nearestIndex = -1
+        var nearestDistance = Double.MAX_VALUE
+
+        route.forEachIndexed { index, point ->
+            val d = distanceBetween(current, point)
+            if (d < nearestDistance) {
+                nearestDistance = d
+                nearestIndex = index
+            }
+        }
+
+        if (nearestIndex == -1) return null
+
+        val safeIndex = nearestIndex.coerceAtLeast(maxReachedRouteIndex)
+        maxReachedRouteIndex = safeIndex
+
+        var completed = 0.0
+        for (i in 0 until safeIndex) {
+            completed += distanceBetween(route[i], route[i + 1])
+        }
+
+        val total = calculatePathDistance(route)
+        val remaining = (total - completed).coerceAtLeast(0.0)
+        val progress = if (total > 0) {
+            ((completed / total) * 100).toInt().coerceIn(0, 100)
+        } else 0
+
+        return FollowProgressResult(
+            progressPercent = progress,
+            completedM = completed,
+            remainingM = remaining,
+            distanceFromRouteM = nearestDistance
+        )
+    }
+    private fun newdistanceBetween(a: LatLng, b: LatLng): Double {
+        return distanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+    }
+    private fun updateFollowUi(
+        progressPercent: Int,
+        remainingM: Double,
+        isOffRoute: Boolean
+    ) {
+        txtRemain.text = "남은 거리 ${"%.1f".format(remainingM / 1000.0)} km"
+        txtDeviation.text =
+            if (isOffRoute) "경로 이탈 ${offRouteCount}회"
+            else "경로 유지 중 ${offRouteCount}회"
+    }
+    private fun projectPointToSegment(
+        p: LatLng,
+        a: LatLng,
+        b: LatLng
+    ): Pair<LatLng, Double> {
+        val ax = a.longitude
+        val ay = a.latitude
+        val bx = b.longitude
+        val by = b.latitude
+        val px = p.longitude
+        val py = p.latitude
+
+        val abx = bx - ax
+        val aby = by - ay
+        val apx = px - ax
+        val apy = py - ay
+
+        val abLenSq = abx * abx + aby * aby
+        val t = if (abLenSq == 0.0) 0.0 else ((apx * abx + apy * aby) / abLenSq).coerceIn(0.0, 1.0)
+
+        val projX = ax + abx * t
+        val projY = ay + aby * t
+        val projected = LatLng.from(projY, projX)
+
+        return projected to t
+    }
+    private fun findProjectedPointOnRoute(
+        current: LatLng,
+        route: List<LatLng>,
+        minProgressDistanceM: Double = 0.0
+    ): ProjectedPointResult? {
+        if (route.size < 2) return null
+
+        var bestSegmentIndex = -1
+        var bestProjected: LatLng? = null
+        var bestDistance = Double.MAX_VALUE
+        var progressDistance = 0.0
+        var bestProgressDistance = 0.0
+
+        for (i in 0 until route.lastIndex) {
+            val a = route[i]
+            val b = route[i + 1]
+
+            val (projected, t) = projectPointToSegment(current, a, b)
+            val dist = distanceBetween(current, projected)
+
+            val segmentLength = distanceBetween(a, b)
+            val currentProgress = progressDistance + segmentLength * t
+
+            if (currentProgress + progressBacktrackToleranceM < minProgressDistanceM) {
+                progressDistance += segmentLength
+                continue
+            }
+
+            if (dist < bestDistance) {
+                bestDistance = dist
+                bestProjected = projected
+                bestSegmentIndex = i
+                bestProgressDistance = currentProgress
+            }
+
+            progressDistance += segmentLength
+        }
+
+        val proj = bestProjected ?: return null
+
+        return ProjectedPointResult(
+            segmentIndex = bestSegmentIndex,
+            projected = proj,
+            distanceFromRouteM = bestDistance,
+            progressDistanceM = bestProgressDistance
+        )
+    }
+    private fun bearing(from: LatLng, to: LatLng): Double {
+        val lat1 = Math.toRadians(from.latitude)
+        val lon1 = Math.toRadians(from.longitude)
+        val lat2 = Math.toRadians(to.latitude)
+        val lon2 = Math.toRadians(to.longitude)
+
+        val dLon = lon2 - lon1
+        val y = kotlin.math.sin(dLon) * kotlin.math.cos(lat2)
+        val x = kotlin.math.cos(lat1) * kotlin.math.sin(lat2) -
+                kotlin.math.sin(lat1) * kotlin.math.cos(lat2) * kotlin.math.cos(dLon)
+
+        var brng = Math.toDegrees(kotlin.math.atan2(y, x))
+        brng = (brng + 360.0) % 360.0
+        return brng
+    }
+    private fun normalizedAngleDiff(a: Double, b: Double): Double {
+        return (b - a + 540.0) % 360.0 - 180.0
+    }
+    private fun smoothedBearing(
+        route: List<LatLng>,
+        fromIndex: Int,
+        toIndex: Int
+    ): Double? {
+        if (route.size < 2) return null
+        if (fromIndex < 0 || toIndex >= route.size || fromIndex >= toIndex) return null
+
+        val from = route[fromIndex]
+        val to = route[toIndex]
+        val dist = distanceBetween(from, to)
+        if (dist < minTurnDistanceM) return null
+
+        return bearing(from, to)
+    }
+
+    private fun routeDistance(points: List<LatLng>, start: Int, end: Int): Double {
+        if (points.size < 2 || start >= end) return 0.0
+        var sum = 0.0
+        for (i in start until end) {
+            sum += distanceBetween(points[i], points[i + 1])
+        }
+        return sum
+    }
+
+    private fun angleDiffDeg(a: Double, b: Double): Double {
+        var diff = (b - a + 540.0) % 360.0 - 180.0
+        return diff
+    }
+
+    private fun directionTextByAngle(angle: Double): String {
+        val absAngle = kotlin.math.abs(angle)
+        return when {
+            absAngle < 20 -> "직진"
+            angle in 20.0..45.0 -> "완만한 우회전"
+            angle in 45.0..120.0 -> "우회전"
+            angle > 120.0 -> "급우회전"
+            angle in -45.0..-20.0 -> "완만한 좌회전"
+            angle in -120.0..-45.0 -> "좌회전"
+            angle < -120.0 -> "급좌회전"
+            else -> "직진"
+        }
+    }
+    private fun findNextTurn(
+        route: List<LatLng>,
+        projectedResult: ProjectedPointResult
+    ): NextTurnResult? {
+        if (route.size < 2) return null
+
+        val currentSegment = projectedResult.segmentIndex
+        var accumulated = distanceBetween(projectedResult.projected, route[currentSegment + 1])
+
+        for (i in (currentSegment + 1) until route.size - 2) {
+            val backStart = (i - lookAheadPoints).coerceAtLeast(0)
+            val backEnd = i
+            val frontStart = i
+            val frontEnd = (i + lookAheadPoints).coerceAtMost(route.lastIndex)
+
+            val beforeBearing = smoothedBearing(route, backStart, backEnd)
+            val afterBearing = smoothedBearing(route, frontStart, frontEnd)
+
+            if (beforeBearing == null || afterBearing == null) {
+                if (i < route.size - 1) {
+                    accumulated += distanceBetween(route[i], route[i + 1])
+                }
+                continue
+            }
+
+            val angle = normalizedAngleDiff(beforeBearing, afterBearing)
+
+            if (kotlin.math.abs(angle) >= turnDetectAngleDeg) {
+                return NextTurnResult(
+                    directionText = directionTextByAngle(angle),
+                    distanceToTurnM = accumulated
+                )
+            }
+
+            if (i < route.size - 1) {
+                accumulated += distanceBetween(route[i], route[i + 1])
+            }
+        }
+
+        return NextTurnResult(
+            directionText = "직진",
+            distanceToTurnM = accumulated
+        )
+    }
+    private fun updateExpectedRouteMarker(map: KakaoMap, pos: LatLng) {
+        val labelManager = map.labelManager ?: return
+        val layer = labelManager.layer ?: return
+
+        runCatching { expectedRouteMarker?.let { layer.remove(it) } }
+
+        val styles = labelManager.addLabelStyles(
+            LabelStyles.from(
+                LabelStyle.from(createCircleMarkerBitmap(Color.parseColor("#204996"), 28))
+            )
+        )
+
+        expectedRouteMarker = layer.addLabel(
+            LabelOptions.from(pos).setStyles(styles)
+        )
+    }
+
+    private fun addOffRouteMarker(map: KakaoMap, pos: LatLng) {
+        val labelManager = map.labelManager ?: return
+        val layer = labelManager.layer ?: return
+        val styles = labelManager.addLabelStyles(
+            LabelStyles.from(
+                LabelStyle.from(createCircleMarkerBitmap(Color.RED, 34))
+            )
+        )
+
+        val marker = layer.addLabel(LabelOptions.from(pos).setStyles(styles))
+        offRouteMarkers.add(marker)
+    }
+
+    private fun createCircleMarkerBitmap(color: Int, sizePx: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = Paint.Style.FILL
+        }
+
+        val radius = sizePx / 2f
+        canvas.drawCircle(radius, radius, radius, paint)
+
+        paint.apply {
+            this.color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = (sizePx * 0.16f).coerceAtLeast(2f)
+        }
+        canvas.drawCircle(radius, radius, radius - paint.strokeWidth / 2f, paint)
+        return bitmap
+    }
+    private fun updateNavigationUi(
+        remainingM: Double,
+        offRoute: Boolean,
+        nextTurn: NextTurnResult?
+    ) {
+        txtRemain.text = "%.1f km".format(remainingM / 1000.0)
+        txtDeviation.text = "${offRouteCount}회"
+
+        if (offRoute) {
+            txtNavInstruction.text = "경로 이탈: 루트로 복귀하세요"
+            txtNavDistance.text = "루트에서 벗어났습니다"
+            updateDirectionIcon(directionText = "", offRoute = true)
+            return
+        }
+
+        if (nextTurn == null) {
+            txtNavInstruction.text = "다음 안내: 직진"
+            txtNavDistance.text = "직진 구간"
+            updateDirectionIcon("직진", offRoute = false)
+            return
+        }
+
+        txtNavInstruction.text = when {
+            nextTurn.distanceToTurnM < 15 -> "지금 ${nextTurn.directionText}"
+            nextTurn.distanceToTurnM < 50 -> "곧 ${nextTurn.directionText}"
+            else -> "다음 안내: ${nextTurn.directionText}"
+        }
+        updateDirectionIcon(nextTurn.directionText,offRoute = false)
+
+        txtNavDistance.text = "다음 꺾임까지 ${nextTurn.distanceToTurnM.toInt()}m"
+    }
+    private data class ProjectedPointResult(
+        val segmentIndex: Int,
+        val projected: LatLng,
+        val distanceFromRouteM: Double,
+        val progressDistanceM: Double
+    )
+
+    private data class NextTurnResult(
+        val directionText: String,
+        val distanceToTurnM: Double
+    )
+    private fun updateDirectionIcon(directionText: String,offRoute: Boolean) {
+        if (!::navIcon.isInitialized) return
+
+        val resId = when {
+            offRoute -> R.drawable.x
+            "좌회전" in directionText -> R.drawable.left
+            "우회전" in directionText -> R.drawable.right
+            else -> R.drawable.go
+        }
+        navIcon.setImageResource(resId)
+    }
+    private fun startRunningIndicator() {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_START
+            putExtra(RunningIndicatorService.EXTRA_TIME, "00:00")
+            putExtra(RunningIndicatorService.EXTRA_DISTANCE_KM, "0.0 km")
+            putExtra(RunningIndicatorService.EXTRA_PACE, "-'--\"")
+            putExtra(RunningIndicatorService.EXTRA_IS_PAUSED, false)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun updateRunningIndicator(timeText: String, distanceText: String, paceText: String) {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_UPDATE
+            putExtra(RunningIndicatorService.EXTRA_TIME, timeText)
+            putExtra(RunningIndicatorService.EXTRA_DISTANCE_KM, distanceText)
+            putExtra(RunningIndicatorService.EXTRA_PACE, paceText)
+            putExtra(RunningIndicatorService.EXTRA_IS_PAUSED, isPaused)
+        }
+        startService(intent)
+    }
+
+    private fun stopRunningIndicator() {
+        val intent = Intent(this, RunningIndicatorService::class.java).apply {
+            action = RunningIndicatorService.ACTION_STOP
+        }
+        startService(intent)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.cancel(RunningIndicatorService.NOTIFICATION_ID)
+    }
+
+    private fun handleIndicatorAction(action: String?) {
+        when (action) {
+            RunningIndicatorActionReceiver.ACTION_PAUSE_RESUME -> {
+                if (::pauseBtn.isInitialized) {
+                    togglePause(pauseBtn)
+                }
+            }
+
+            RunningIndicatorActionReceiver.ACTION_STOP -> {
+                stopRunningAndFinish()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIndicatorAction(intent.getStringExtra("indicator_action"))
     }
 }

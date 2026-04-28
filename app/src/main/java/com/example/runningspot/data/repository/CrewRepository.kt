@@ -1,12 +1,10 @@
-package com.example.runningspot.data
+package com.example.runningspot.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
-import kotlin.jvm.java
-import com.example.runningspot.data.repository.CrewPost
 
 class CrewRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()

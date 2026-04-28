@@ -29,4 +29,5 @@ object ApiClient {
     val authApi: com.example.runningspot.data.remote.AuthApi by lazy {
         retrofit.create(com.example.runningspot.data.remote.AuthApi::class.java)
     }
+    val runApi: RunApi by lazy { retrofit.create(RunApi::class.java) }
 }

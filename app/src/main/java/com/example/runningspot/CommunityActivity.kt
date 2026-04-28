@@ -4,13 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -21,12 +17,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
@@ -44,8 +37,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.ui.calcCalories
 import com.example.runningspot.ui.calcPace
@@ -63,20 +54,31 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.example.runningspot.data.repository.CrewPost
 import com.example.runningspot.ui.CrewChatScreen
-import com.example.runningspot.data.CrewRepository
+import com.example.runningspot.data.repository.CrewRepository
 import com.google.firebase.storage.FirebaseStorage
-import java.io.File
-import java.io.FileOutputStream
 import java.util.UUID
+import com.example.runningspot.data.remote.RouteSummary
+import com.example.runningspot.data.repository.fetchMyRoutes
+import com.example.runningspot.ui.RouteMapByRouteDetail
+import com.example.runningspot.viewmodel.RouteDetailViewModel
+
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
 import com.example.runningspot.ui.theme.DialogContainer
 import com.example.runningspot.ui.theme.DialogText
 import com.example.runningspot.ui.theme.DialogTitle
-import com.example.runningspot.data.repository.fetchRouteDetail
-import com.example.runningspot.data.remote.RouteSummary
-import com.example.runningspot.data.repository.fetchMyRoutes
 import com.example.runningspot.ui.theme.RunningSpotTheme
-import com.example.runningspot.ui.RouteMapByRouteDetail
-import com.example.runningspot.viewmodel.RouteDetailViewModel
+import java.io.File
+import java.io.FileOutputStream
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.example.runningspot.data.repository.Comment
+import com.example.runningspot.data.repository.CommunityPostRepository
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +90,7 @@ class CommunityActivity : ComponentActivity() {
                 return
             }
             setContent {
+                CrewDetailScreen(crewId = crewId)
                 RunningSpotTheme {
                     CrewDetailScreen(crewId = crewId)
                 }
@@ -121,18 +124,23 @@ class CommunityActivity : ComponentActivity() {
             val initialImageUri = intent.getStringExtra("initialImageUri")
 
             setContent {
-                RunningSpotTheme {
-                    if (writeType == "crew") {
-                        CrewWriteScreen(userName = userName)
-                    } else {
-                        WritePostScreen(
-                            userName = userName,
-                            prefs = prefs,
-                            editDocId = editDocId,
-                            initialTitle = initialTitle,
-                            initialContent = initialContent,
-                            initialImageUri = initialImageUri
-                        )
+                if (writeType == "crew") {
+                    CrewWriteScreen(userName = userName)
+                } else {
+                    WritePostScreen(userName, prefs) // ✅ 기존 피드 글쓰기 그대로
+                    RunningSpotTheme {
+                        if (writeType == "crew") {
+                            CrewWriteScreen(userName = userName)
+                        } else {
+                            WritePostScreen(
+                                userName = userName,
+                                prefs = prefs,
+                                editDocId = editDocId,
+                                initialTitle = initialTitle,
+                                initialContent = initialContent,
+                                initialImageUri = initialImageUri
+                            )
+                        }
                     }
                 }
             }
@@ -272,7 +280,6 @@ fun CrewWriteScreen(userName: String) {
                         Toast.makeText(context, "로그인이 필요합니다", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-
                     val db = FirebaseFirestore.getInstance()
                     isSubmitting = true
                     val crewRef = db.collection("crews").document()   // ✅ ID를 미리 확보
@@ -317,7 +324,6 @@ fun CrewWriteScreen(userName: String) {
             ) {
                 Text(if (isSubmitting) "등록 중..." else "등록")
             }
-
             if (isSubmitting) {
                 AlertDialog(
                     onDismissRequest = {},
@@ -361,7 +367,6 @@ fun WritePostScreen(
                 colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
             }
             canvas.drawBitmap(source, 0f, 0f, paint)
-
             val outFile = File(context.cacheDir, "post_default_logo_gray.jpg")
             FileOutputStream(outFile).use { stream ->
                 out.compress(Bitmap.CompressFormat.JPEG, 92, stream)
@@ -369,12 +374,11 @@ fun WritePostScreen(
             Uri.fromFile(outFile)
         }.getOrNull()
     }
-
     var title by remember { mutableStateOf(initialTitle.orEmpty()) }
     var content by remember { mutableStateOf(initialContent.orEmpty()) }
+    var previewImageUrl by remember { mutableStateOf(initialImageUri) }
     var hashtags by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    var previewImageUrl by remember { mutableStateOf(initialImageUri) }
     var selectedRun by remember { mutableStateOf<RunSummaryRef?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
     //사진 선택 런처
@@ -539,6 +543,7 @@ fun WritePostScreen(
                             "userId" to user.uid,
                             "userName" to (userName ?: user.displayName ?: "익명"),
                             "content" to trimmedContent,
+                            // ✅ Firestore에는 content:// 말고 downloadUrl을 저장
                             "imageUrls" to listOfNotNull(imageDownloadUrl),
 
                             "runSummary" to (selectedRun?.let { r ->
@@ -571,6 +576,7 @@ fun WritePostScreen(
                             }
                     }
 
+                    // ✅ 이미지 없으면 그냥 저장
                     fun updatePost(imageDownloadUrl: String?) {
                         val updateData = hashMapOf<String, Any>(
                             "title" to trimmedTitle,
@@ -689,16 +695,16 @@ fun CommunityDetailScreen(
     docId: String?,
     routeId: Long?,
     onEditRequest: (docId: String, title: String, content: String, imageUri: String?) -> Unit
- ) {
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { com.example.runningspot.data.CommunityPostRepository() }
+    val repo = remember { CommunityPostRepository() }
     val myUid = FirebaseAuth.getInstance().currentUser?.uid
     var likes by rememberSaveable { mutableStateOf(0) }
     var liked by rememberSaveable { mutableStateOf(false) }
     var postAuthorId by remember { mutableStateOf<String?>(null) }
     var comments by remember {
-        mutableStateOf<List<Pair<String, com.example.runningspot.data.Comment>>>(
+        mutableStateOf<List<Pair<String, Comment>>>(
             emptyList()
         )
     }
@@ -1005,7 +1011,7 @@ fun CommunityDetailScreen(
                                 onUpdateStats(likes, comments.size)
                             } catch (e: Exception) {
                                 Toast.makeText(context, "댓글 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                            } finally {
+                            }finally {
                                 isSubmittingComment = false
                             }
                         }
@@ -1060,7 +1066,6 @@ fun CommunityDetailScreen(
             Spacer(Modifier.height(20.dp))
 
         }
-
         if (showDeletePostConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeletePostConfirm = false },

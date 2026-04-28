@@ -41,6 +41,8 @@ import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
 import android.graphics.Color as AColor
+import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
 fun RouteDetailScreen(
@@ -173,7 +175,8 @@ private fun RoutePolylinePreview(
         }
     }
 
-    LaunchedEffect(mapView, route.id) {
+
+        LaunchedEffect(mapView, route.id) {
         mapView.start(object : MapLifeCycleCallback() {
             override fun onMapDestroy() {}
             override fun onMapError(error: Exception?) { error?.printStackTrace() }

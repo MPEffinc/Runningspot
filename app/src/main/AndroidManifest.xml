@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:name=".GlobalApplication"
         android:allowBackup="true"
@@ -51,16 +56,29 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakaoa79a645b5b5c9b0707a7ebe4316ef1ad" android:host="oauth"/>
+                <data android:scheme="kakao4a0414c61069e75577764b8ea65c26e9" android:host="oauth"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".RunningIndicatorService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+        <receiver
+            android:name=".RunningIndicatorActionReceiver"
+            android:exported="false" />
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
-            android:value="a79a645b5b5c9b0707a7ebe4316ef1ad" />
+            android:value="4a0414c61069e75577764b8ea65c26e9" />
         <activity
             android:name=".HealthConnect.PermissionHealth"
             android:exported="true">
-
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -69,7 +87,6 @@
                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
-
         </activity>
     </application>
 
