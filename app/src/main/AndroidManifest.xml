@@ -56,7 +56,7 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="kakaoa79a645b5b5c9b0707a7ebe4316ef1ad" android:host="oauth"/>
+                <data android:scheme="kakaoa761f8d0c71257bbbcebf7f4b89082f9f" android:host="oauth"/>
             </intent-filter>
         </activity>
         <service
@@ -75,7 +75,7 @@
             android:exported="false" />
         <meta-data
             android:name="com.kakao.vectormap.KAKAO_MAP_KEY"
-            android:value="a79a645b5b5c9b0707a7ebe4316ef1ad" />
+            android:value="761f8d0c71257bbbcebf7f4b89082f9f" />
         <activity
             android:name=".HealthConnect.PermissionHealth"
             android:exported="true">
