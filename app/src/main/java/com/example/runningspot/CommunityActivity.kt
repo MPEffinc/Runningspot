@@ -4,8 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -69,12 +67,6 @@ import com.example.runningspot.ui.theme.DialogContainer
 import com.example.runningspot.ui.theme.DialogText
 import com.example.runningspot.ui.theme.DialogTitle
 import com.example.runningspot.ui.theme.RunningSpotTheme
-import java.io.File
-import java.io.FileOutputStream
-import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.example.runningspot.data.repository.Comment
@@ -357,23 +349,6 @@ fun WritePostScreen(
     val context = LocalContext.current
     val isEditMode = !editDocId.isNullOrBlank()
 
-    fun createGrayLogoTempUri(): Uri? {
-        return runCatching {
-            val source = BitmapFactory.decodeResource(context.resources, R.drawable.app_logo)
-                ?: return null
-            val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(out)
-            val paint = Paint().apply {
-                colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-            }
-            canvas.drawBitmap(source, 0f, 0f, paint)
-            val outFile = File(context.cacheDir, "post_default_logo_gray.jpg")
-            FileOutputStream(outFile).use { stream ->
-                out.compress(Bitmap.CompressFormat.JPEG, 92, stream)
-            }
-            Uri.fromFile(outFile)
-        }.getOrNull()
-    }
     var title by remember { mutableStateOf(initialTitle.orEmpty()) }
     var content by remember { mutableStateOf(initialContent.orEmpty()) }
     var previewImageUrl by remember { mutableStateOf(initialImageUri) }
@@ -605,7 +580,7 @@ fun WritePostScreen(
                     }
 
                     // ✅ 이미지 없으면 기본 흑백 로고를 업로드
-                    val uploadUri = if (isEditMode) localImageUri else (localImageUri ?: createGrayLogoTempUri())
+                    val uploadUri = localImageUri
                     if (uploadUri == null) {
                         savePost(null)
                         return@Button
@@ -780,6 +755,7 @@ fun CommunityDetailScreen(
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
         ) {
+            val fallbackImageRes = if (imageRes != 0) imageRes else R.drawable.noimage
 
             // 이미지
             when {
@@ -795,9 +771,9 @@ fun CommunityDetailScreen(
                         contentScale = ContentScale.Crop
                     )
                 }
-                imageRes != 0 -> {
+                else -> {
                     Image(
-                        painter = painterResource(id = imageRes),
+                        painter = painterResource(id = fallbackImageRes),
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -831,9 +807,9 @@ fun CommunityDetailScreen(
                                     contentScale = ContentScale.Fit
                                 )
                             }
-                            imageRes != 0 -> {
+                            else -> {
                                 Image(
-                                    painter = painterResource(id = imageRes),
+                                    painter = painterResource(id = fallbackImageRes),
                                     contentDescription = null,
                                     modifier = Modifier
                                         .fillMaxSize()

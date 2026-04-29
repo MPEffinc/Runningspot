@@ -163,6 +163,7 @@ import com.example.runningspot.data.remote.PrefetchedLocation
 
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.ui.text.TextStyle
 import androidx.health.connect.client.HealthConnectClient
@@ -367,7 +368,8 @@ private enum class MyPageSubScreen {
     Main,
     Info,
     ProfileEdit,
-    Settings
+    Settings,
+    Achievements
 }
 
 private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef, maxKeep: Int = 200) {
@@ -646,6 +648,12 @@ fun MainScreen(
                 } else if (myPageSubScreen == MyPageSubScreen.Settings) {
                     SettingsScreen(
                         padding = padding,
+                        onBack = { myPageSubScreen = MyPageSubScreen.Main },
+                        onShowInfo = { myPageSubScreen = MyPageSubScreen.Info }
+                    )
+                } else if (myPageSubScreen == MyPageSubScreen.Achievements) {
+                    AchievementScreen(
+                        padding = padding,
                         onBack = { myPageSubScreen = MyPageSubScreen.Main }
                     )
                 } else {
@@ -655,7 +663,7 @@ fun MainScreen(
                         userProfile = userProfile,
                         provider = provider,
                         onLogout = onLogout,
-                        onShowInfo = { myPageSubScreen = MyPageSubScreen.Info },
+                        onOpenAchievements = { myPageSubScreen = MyPageSubScreen.Achievements },
                         onOpenProfileSettings = { myPageSubScreen = MyPageSubScreen.ProfileEdit },
                         onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings }
                     )
@@ -2192,7 +2200,7 @@ fun MyPageScreen(
     userProfile: String?,
     provider: String?,
     onLogout: () -> Unit,
-    onShowInfo: () -> Unit,
+    onOpenAchievements: () -> Unit,
     onOpenProfileSettings: () -> Unit,
     onOpenAppSettings: () -> Unit
 ) {
@@ -2334,13 +2342,31 @@ fun MyPageScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                val currentTitle = "첫 러닝 스타터"
+
                 Text(
                     text = displayName,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0xFFF4EDFF))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = currentTitle,
+                        color = Color(0xFF6750A4),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
                     text = provider?.uppercase() ?: "",
@@ -2461,15 +2487,15 @@ fun MyPageScreen(
                                 MenuPopupButton(
                                     icon = {
                                         Icon(
-                                            imageVector = Icons.Default.Info,
-                                            contentDescription = "앱 정보",
+                                            imageVector = Icons.Default.EmojiEvents,
+                                            contentDescription = "업적",
                                             tint = Color(0xFFFAFAF8)
                                         )
                                     },
-                                    title = "앱 정보",
+                                    title = "업적",
                                     onClick = {
                                         showMenu = false
-                                        onShowInfo()
+                                        onOpenAchievements()
                                     }
                                 )
 
@@ -3071,7 +3097,8 @@ private fun NumberWheel(
 @Composable
 private fun SettingsScreen(
     padding: PaddingValues,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onShowInfo: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -3229,6 +3256,62 @@ private fun SettingsScreen(
                 }
             }
         }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "앱 관리",
+            style = TextStyle(
+                fontSize = 14.sp,
+                color = Color.Gray,
+                fontWeight = FontWeight.Medium
+            )
+        )
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onShowInfo() },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+            elevation = CardDefaults.cardElevation(0.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(Color(0xFFE9ECEF), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color.Gray
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "앱 정보",
+                        style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    )
+                    Text(
+                        text = "버전, 서비스 소개, 문의 정보 확인",
+                        style = TextStyle(fontSize = 13.sp, color = Color.Gray)
+                    )
+                }
+
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Color.LightGray
+                )
+            }
+        }
         if (showDisconnectDialog) {
             AlertDialog(
                 onDismissRequest = { showDisconnectDialog = false },
@@ -3310,6 +3393,7 @@ fun MyPinterestPostCard(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
+            val fallbackImageRes = R.drawable.noimage
 
             // ✅ 1. 이미지 (메인)
             if (!post.imageUrl.isNullOrBlank()) {
@@ -3330,15 +3414,21 @@ fun MyPinterestPostCard(
                 )
             } else {
                 // 이미지 없는 경우 (fallback)
-                Box(
+                Image(
+                    painter = painterResource(id = fallbackImageRes),
+                    contentDescription = "기본 게시글 이미지",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
-                        .background(Color(0xFFF0F0EE)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No Image", color = Color(0xFF2A2A2A))
-                }
+                        .height(
+                            when ((post.id.hashCode() and 3)) {
+                                0 -> 160.dp
+                                1 -> 200.dp
+                                2 -> 240.dp
+                                else -> 180.dp
+                            }
+                        )
+                )
             }
 
             // ✅ 2. 아래 한 줄 (좋아요 / 댓글)
@@ -4273,22 +4363,179 @@ private fun HistoryList(
             }
         }
     }
-    @Composable
-    private fun RouteInfoRow(
-        label: String,
-        value: String
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+@Composable
+private fun RouteInfoRow(
+    label: String,
+    value: String
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+data class AchievementUiModel(
+    val title: String,
+    val description: String,
+    val unlocked: Boolean
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AchievementScreen(
+    padding: PaddingValues,
+    onBack: () -> Unit
+) {
+    val achievements = remember {
+        listOf(
+            AchievementUiModel(
+                title = "첫 러닝 스타터",
+                description = "첫 러닝을 완료했어요",
+                unlocked = true
+            ),
+            AchievementUiModel(
+                title = "백만 불 짜리 다리",
+                description = "누적 거리 100km 달성",
+                unlocked = false
+            ),
+            AchievementUiModel(
+                title = "꾸준한 러너",
+                description = "7일 연속 러닝 달성",
+                unlocked = false
+            ),
+            AchievementUiModel(
+                title = "새벽의 질주자",
+                description = "오전 6시 이전 러닝 5회",
+                unlocked = false
+            ),
+            AchievementUiModel(
+                title = "커뮤니티 입문자",
+                description = "게시글 첫 작성 완료",
+                unlocked = true
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
+        )
+    }
+
+    val unlockedCount = achievements.count { it.unlocked }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("업적") },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("뒤로") }
+                }
             )
         }
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(innerPadding)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4EDFF)),
+                    elevation = CardDefaults.cardElevation(0.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        Text(
+                            text = "대표 칭호",
+                            fontSize = 13.sp,
+                            color = Color(0xFF6750A4)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "첫 러닝 스타터",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF3D2A73)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "획득 업적 $unlockedCount / ${achievements.size}",
+                            fontSize = 14.sp,
+                            color = Color(0xFF5B4B8A)
+                        )
+                    }
+                }
+            }
+
+            items(achievements) { achievement ->
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (achievement.unlocked) Color(0xFFFAFAF8) else Color(
+                            0xFFF3F3F3
+                        )
+                    ),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (achievement.unlocked) Color(0xFFFFF3CD) else Color(
+                                        0xFFE5E5E5
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (achievement.unlocked) "🏆" else "🔒",
+                                fontSize = 24.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = achievement.title,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = if (achievement.unlocked) Color.Black else Color.Gray
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = achievement.description,
+                                fontSize = 13.sp,
+                                color = Color.Gray
+                            )
+                        }
+
+                        Text(
+                            text = if (achievement.unlocked) "달성" else "미달성",
+                            color = if (achievement.unlocked) Color(0xFF6750A4) else Color.Gray,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
     }
+}

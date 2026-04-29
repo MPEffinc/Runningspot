@@ -1007,6 +1007,7 @@ class RunningActivity : ComponentActivity() {
 
         val finalDurationMs = getElapsedDurationMs()
         val absoluteEndTimeMs = System.currentTimeMillis() // 헬스 커넥트용 종료 시각
+        val resultIntent = Intent()
         isRunning = false
         timerHandler.removeCallbacks(timerTicker)
         fused.removeLocationUpdates(locationCallback)
@@ -1050,53 +1051,49 @@ class RunningActivity : ComponentActivity() {
                 wearableCalories = healthConnectManager.readSessionCalories(startInst, endInst)
             }
             // 결과 경로를 Intent로 반환
-            val intent = Intent()
-            intent.putExtra("runningDistance", totalDistance)
-            intent.putExtra("runningTime", finalDurationMs)
-            intent.putExtra("pathSize", runningPath.size)
+            resultIntent.putExtra("runningDistance", totalDistance)
+            resultIntent.putExtra("runningTime", finalDurationMs)
+            resultIntent.putExtra("pathSize", runningPath.size)
             runningPath.forEachIndexed { i, latLng ->
-                intent.putExtra("lat_$i", latLng.latitude)
-                intent.putExtra("lng_$i", latLng.longitude)
+                resultIntent.putExtra("lat_$i", latLng.latitude)
+                resultIntent.putExtra("lng_$i", latLng.longitude)
             }
-            intent.putExtra("startTimeMs", absoluteStartTimeMs)
-            intent.putExtra("endTimeMs", absoluteEndTimeMs)
-            intent.putExtra("wearableSteps", wearableSteps)
-            intent.putExtra("wearableHeartRate", wearableHeartRate)
-            intent.putExtra("wearableCalories", wearableCalories)
-            setResult(RESULT_OK, intent)
+            resultIntent.putExtra("startTimeMs", absoluteStartTimeMs)
+            resultIntent.putExtra("endTimeMs", absoluteEndTimeMs)
+            resultIntent.putExtra("wearableSteps", wearableSteps)
+            resultIntent.putExtra("wearableHeartRate", wearableHeartRate)
+            resultIntent.putExtra("wearableCalories", wearableCalories)
+            setResult(RESULT_OK, resultIntent)
         }
-        runningPath.forEachIndexed { i, latLng ->
-            intent.putExtra("lat_$i", latLng.latitude)
-            intent.putExtra("lng_$i", latLng.longitude)
-        }
+
         val followResultPath = if (followMode && autoCompleted && guidePoints.isNotEmpty()) {
             guidePoints
         } else {
             runningPath
         }
-        intent.putExtra("followPathSize", followResultPath.size)
+        resultIntent.putExtra("followPathSize", followResultPath.size)
         followResultPath.forEachIndexed { i, latLng ->
-            intent.putExtra("follow_lat_$i", latLng.latitude)
-            intent.putExtra("follow_lng_$i", latLng.longitude)
+            resultIntent.putExtra("follow_lat_$i", latLng.latitude)
+            resultIntent.putExtra("follow_lng_$i", latLng.longitude)
         }
 
-        intent.putExtra("followMode", followMode)
-        intent.putExtra("offRouteCount", offRouteCount)
-        intent.putExtra("followRouteTitle", followRouteTitle)
-        intent.putExtra("autoCompleted", autoCompleted)
-        intent.putExtra("followCompleted", autoCompleted)
-        intent.putExtra("completionStatus", if (autoCompleted) "completed" else "stopped")
+            resultIntent.putExtra("followMode", followMode)
+            resultIntent.putExtra("offRouteCount", offRouteCount)
+            resultIntent.putExtra("followRouteTitle", followRouteTitle)
+            resultIntent.putExtra("autoCompleted", autoCompleted)
+            resultIntent.putExtra("followCompleted", autoCompleted)
+            resultIntent.putExtra("completionStatus", if (autoCompleted) "completed" else "stopped")
 
-        if (followMode && guidePoints.isNotEmpty()) {
-            val current = runningPath.lastOrNull()
-            val result = current?.let { calculateFollowProgress(it, guidePoints) }
-            intent.putExtra("followProgressPercent", result?.progressPercent ?: 0)
-        }
+            if (followMode && guidePoints.isNotEmpty()) {
+                val current = runningPath.lastOrNull()
+                val result = current?.let { calculateFollowProgress(it, guidePoints) }
+                resultIntent.putExtra("followProgressPercent", result?.progressPercent ?: 0)
+            }
 
-        setResult(RESULT_OK, intent)
+        setResult(RESULT_OK, resultIntent)
 
         Toast.makeText(
-            this,
+            this@RunningActivity,
             when {
                 followMode && autoCompleted -> "따라뛰기 완료!"
                 followMode -> "따라뛰기 종료!"
