@@ -3,22 +3,43 @@ package com.example.runningspot
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.media.ExifInterface
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
+import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.ui.getCircularBitmap
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.material.button.MaterialButton
+import com.kakao.vectormap.GestureType
 import com.kakao.vectormap.KakaoMap
 import com.kakao.vectormap.KakaoMapReadyCallback
 import com.kakao.vectormap.LatLng
@@ -34,40 +55,13 @@ import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
+import kotlinx.coroutines.launch
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.media.ExifInterface
-import android.net.Uri
-import android.os.Build
-import android.telecom.VideoProfile.isPaused
-import android.view.Gravity
-import android.view.View
-import android.widget.FrameLayout
-import androidx.lifecycle.lifecycleScope
-import com.example.runningspot.data.remote.ApiClient
-import com.google.android.material.button.MaterialButton
-import com.example.runningspot.ui.getCircularBitmap
-import com.kakao.vectormap.GestureType
-import kotlinx.coroutines.launch
-import android.os.Handler
-import android.os.Looper
-import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.widget.ImageView
-import android.widget.LinearLayout
-import androidx.compose.ui.graphics.toArgb
-import com.example.runningspot.ui.theme.AppWhite
-import com.example.runningspot.ui.theme.BrandBlue
-import kotlin.jvm.java
 
 
 class RunningActivity : ComponentActivity() {
@@ -1037,9 +1031,11 @@ class RunningActivity : ComponentActivity() {
         lifecycleScope.launch {
             // 웨어러블 기기 데이터 동기화 시간 딜레이
             kotlinx.coroutines.delay(1500)
+
             var wearableSteps = 0L
             var wearableHeartRate = 0L
             var wearableCalories = 0.0
+
             if (healthConnectManager.checkAvailability() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE &&
                 healthConnectManager.hasAllPermissions()
             ) {
@@ -1050,32 +1046,38 @@ class RunningActivity : ComponentActivity() {
                 wearableHeartRate = healthConnectManager.readSessionAvgHeartRate(startInst, endInst)
                 wearableCalories = healthConnectManager.readSessionCalories(startInst, endInst)
             }
-            // 결과 경로를 Intent로 반환
+
+            // 기본 러닝 기록
             resultIntent.putExtra("runningDistance", totalDistance)
             resultIntent.putExtra("runningTime", finalDurationMs)
             resultIntent.putExtra("pathSize", runningPath.size)
+
             runningPath.forEachIndexed { i, latLng ->
                 resultIntent.putExtra("lat_$i", latLng.latitude)
                 resultIntent.putExtra("lng_$i", latLng.longitude)
             }
+
             resultIntent.putExtra("startTimeMs", absoluteStartTimeMs)
             resultIntent.putExtra("endTimeMs", absoluteEndTimeMs)
+
+            // 웨어러블 데이터
             resultIntent.putExtra("wearableSteps", wearableSteps)
             resultIntent.putExtra("wearableHeartRate", wearableHeartRate)
             resultIntent.putExtra("wearableCalories", wearableCalories)
-            setResult(RESULT_OK, resultIntent)
-        }
 
-        val followResultPath = if (followMode && autoCompleted && guidePoints.isNotEmpty()) {
-            guidePoints
-        } else {
-            runningPath
-        }
-        resultIntent.putExtra("followPathSize", followResultPath.size)
-        followResultPath.forEachIndexed { i, latLng ->
-            resultIntent.putExtra("follow_lat_$i", latLng.latitude)
-            resultIntent.putExtra("follow_lng_$i", latLng.longitude)
-        }
+            // 따라뛰기 기록
+            val followResultPath = if (followMode && autoCompleted && guidePoints.isNotEmpty()) {
+                guidePoints
+            } else {
+                runningPath
+            }
+
+            resultIntent.putExtra("followPathSize", followResultPath.size)
+
+            followResultPath.forEachIndexed { i, latLng ->
+                resultIntent.putExtra("follow_lat_$i", latLng.latitude)
+                resultIntent.putExtra("follow_lng_$i", latLng.longitude)
+            }
 
             resultIntent.putExtra("followMode", followMode)
             resultIntent.putExtra("offRouteCount", offRouteCount)
@@ -1090,19 +1092,20 @@ class RunningActivity : ComponentActivity() {
                 resultIntent.putExtra("followProgressPercent", result?.progressPercent ?: 0)
             }
 
-        setResult(RESULT_OK, resultIntent)
+            setResult(RESULT_OK, resultIntent)
 
-        Toast.makeText(
-            this@RunningActivity,
-            when {
-                followMode && autoCompleted -> "따라뛰기 완료!"
-                followMode -> "따라뛰기 종료!"
-                else -> "러닝 종료!"
-            },
-            Toast.LENGTH_SHORT
-        ).show()
+            Toast.makeText(
+                this@RunningActivity,
+                when {
+                    followMode && autoCompleted -> "따라뛰기 완료!"
+                    followMode -> "따라뛰기 종료!"
+                    else -> "러닝 종료!"
+                },
+                Toast.LENGTH_SHORT
+            ).show()
 
-        finish()
+            finish()
+        }
     }
 
     // ✅ 지도 관련 함수

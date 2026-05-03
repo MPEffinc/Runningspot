@@ -1,19 +1,31 @@
 package com.example.runningspot.ui
 
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Log
+import android.widget.NumberPicker
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,42 +33,80 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,28 +114,52 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import com.example.runningspot.CommunityActivity
+import com.example.runningspot.HealthConnect.HealthConnectManager
 import com.example.runningspot.R
+import com.example.runningspot.RunningActivity
+import com.example.runningspot.data.remote.ApiClient
+import com.example.runningspot.data.remote.PrefetchedLocation
+import com.example.runningspot.data.remote.RunHistoryDto
+import com.example.runningspot.data.repository.CommunityPostRepository
+import com.example.runningspot.data.repository.CrewPost
+import com.example.runningspot.data.repository.CrewRepository
+import com.example.runningspot.data.repository.RunRepository
+import com.example.runningspot.ui.theme.DialogContainer
+import com.example.runningspot.ui.theme.DialogText
+import com.example.runningspot.ui.theme.DialogTitle
+import com.example.runningspot.viewmodel.ProfileEditViewModel
+import com.example.runningspot.viewmodel.RouteViewModel
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.kakao.sdk.user.UserApiClient
 import com.kakao.vectormap.KakaoMap
 import com.kakao.vectormap.KakaoMapReadyCallback
 import com.kakao.vectormap.LatLng
@@ -95,83 +169,16 @@ import com.kakao.vectormap.camera.CameraUpdateFactory
 import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelStyles
+import com.kakao.vectormap.label.LabelTextBuilder
 import com.kakao.vectormap.route.RouteLine
 import com.kakao.vectormap.route.RouteLineManager
 import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
-
-
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Matrix
-import android.media.ExifInterface
-import android.widget.NumberPicker
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.border
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.rememberCoroutineScope
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.firebase.auth.FirebaseAuth
-import com.kakao.sdk.user.UserApiClient
-import com.example.runningspot.data.repository.CrewRepository
 import kotlinx.coroutines.launch
-import com.example.runningspot.data.repository.CrewPost
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.IconButton
-import androidx.compose.runtime.collectAsState
-import com.example.runningspot.data.remote.ApiClient
-import com.example.runningspot.data.remote.RunHistoryDto
-import com.example.runningspot.viewmodel.RouteViewModel
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.tasks.await
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.Settings
-import com.example.runningspot.ui.theme.DialogContainer
-import com.example.runningspot.ui.theme.DialogText
-import com.example.runningspot.ui.theme.DialogTitle
-
-import androidx.compose.material3.*
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.DirectionsRun
-import androidx.compose.ui.platform.LocalConfiguration
-import com.kakao.vectormap.label.LabelTextBuilder
 import kotlin.math.roundToInt
-import com.example.runningspot.data.remote.PrefetchedLocation
-
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Watch
-import androidx.compose.ui.text.TextStyle
-import androidx.health.connect.client.HealthConnectClient
-import com.example.runningspot.HealthConnect.HealthConnectManager
-import androidx.health.connect.client.PermissionController
-import com.example.runningspot.RunningActivity
-import com.example.runningspot.data.repository.CommunityPostRepository
-import com.example.runningspot.data.repository.RunRepository
 
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
@@ -486,6 +493,7 @@ fun MainScreen(
     val runRefs = remember { mutableStateListOf<RunSummaryRef>() }
     var myPageSubScreen by rememberSaveable { mutableStateOf(MyPageSubScreen.Main) }
     var isRunHistoryLoading by remember { mutableStateOf(false) }
+    var profileRefreshKey by remember { mutableIntStateOf(0) }
 
 // 앱 시작 시 서버에 저장된 기록 읽어오기
     LaunchedEffect(Unit) {
@@ -643,7 +651,10 @@ fun MainScreen(
                         padding = padding,
                         fallbackUserName = userName,
                         fallbackProfileUrl = userProfile,
-                        onBack = { myPageSubScreen = MyPageSubScreen.Main }
+                        onBack = {
+                            profileRefreshKey++
+                            myPageSubScreen = MyPageSubScreen.Main
+                        }
                     )
                 } else if (myPageSubScreen == MyPageSubScreen.Settings) {
                     SettingsScreen(
@@ -654,6 +665,7 @@ fun MainScreen(
                 } else if (myPageSubScreen == MyPageSubScreen.Achievements) {
                     AchievementScreen(
                         padding = padding,
+                        runs = runRefs,
                         onBack = { myPageSubScreen = MyPageSubScreen.Main }
                     )
                 } else {
@@ -665,7 +677,8 @@ fun MainScreen(
                         onLogout = onLogout,
                         onOpenAchievements = { myPageSubScreen = MyPageSubScreen.Achievements },
                         onOpenProfileSettings = { myPageSubScreen = MyPageSubScreen.ProfileEdit },
-                        onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings }
+                        onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings },
+                        profileRefreshKey = profileRefreshKey
                     )
                 }
             }
@@ -2202,7 +2215,8 @@ fun MyPageScreen(
     onLogout: () -> Unit,
     onOpenAchievements: () -> Unit,
     onOpenProfileSettings: () -> Unit,
-    onOpenAppSettings: () -> Unit
+    onOpenAppSettings: () -> Unit,
+    profileRefreshKey: Int
 ) {
     val context = LocalContext.current
 
@@ -2226,7 +2240,7 @@ fun MyPageScreen(
     }
 
     // ✅ 최초 진입 시 users/{uid}.profileUrl 읽기
-    LaunchedEffect(uid) {
+    LaunchedEffect(uid, profileRefreshKey) {
         val currentUid = uid ?: return@LaunchedEffect
         try {
             val doc = db.collection("users").document(currentUid).get().await()
@@ -2247,7 +2261,7 @@ fun MyPageScreen(
         !userProfile.isNullOrBlank() -> userProfile
         else -> null
     }
-    LaunchedEffect(uid) {
+    LaunchedEffect(uid, profileRefreshKey) {
         val currentUid = uid ?: return@LaunchedEffect
         postsLoading = true
         try {
@@ -2560,13 +2574,31 @@ private fun ProfileEditScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
-    val storage = remember { FirebaseStorage.getInstance() }
     val uid = auth.currentUser?.uid
 
-    var profileUrl by remember { mutableStateOf(fallbackProfileUrl) }
+    val viewModel: ProfileEditViewModel = viewModel()
+    val profileState by viewModel.state.collectAsState()
+
+    LaunchedEffect(fallbackProfileUrl) {
+        viewModel.setInitialProfileUrl(fallbackProfileUrl)
+    }
+
+    LaunchedEffect(profileState.message) {
+        profileState.message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearMessage()
+        }
+    }
+
+    LaunchedEffect(profileState.saveSuccess) {
+        if (profileState.saveSuccess) {
+            viewModel.clearSaveSuccess()
+            onBack()
+        }
+    }
+
     var nickname by remember { mutableStateOf(fallbackUserName.orEmpty()) }
     val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
     var birthYear by remember { mutableStateOf(currentYear - 20) }
@@ -2578,49 +2610,64 @@ private fun ProfileEditScreen(
     var goalInt by remember { mutableStateOf(3) }
     var goalDec by remember { mutableStateOf(0) }
     var gender by remember { mutableStateOf("미설정") }
-    var saving by remember { mutableStateOf(false) }
+
     var showBirthYearPicker by remember { mutableStateOf(false) }
     var showHeightPicker by remember { mutableStateOf(false) }
     var showWeightPicker by remember { mutableStateOf(false) }
     var showDailyGoalPicker by remember { mutableStateOf(false) }
 
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null || uid == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            runCatching {
-                val ref = storage.reference.child("profileImages/$uid/profile_${System.currentTimeMillis()}.jpg")
-                ref.putFile(uri).await()
-                profileUrl = ref.downloadUrl.await().toString()
-            }.onFailure {
-                Toast.makeText(context, "프로필 이미지 업로드 실패", Toast.LENGTH_SHORT).show()
-            }
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.uploadProfileImage(context.applicationContext, uri)
         }
     }
 
     LaunchedEffect(uid) {
         if (uid == null) return@LaunchedEffect
+
         runCatching {
             val doc = db.collection("users").document(uid).get().await()
+
             nickname = doc.getString("nickname") ?: nickname
-            profileUrl = doc.getString("profileUrl") ?: profileUrl
+            viewModel.setInitialProfileUrl(doc.getString("profileUrl"))
+
             val birthDateText = doc.getString("birthDate")
             val birthParts = birthDateText?.split("-")
+
             birthYear = birthParts?.getOrNull(0)?.toIntOrNull()
                 ?: doc.getLong("birthYear")?.toInt()
                         ?: birthYear
-            birthMonth = birthParts?.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 12) ?: birthMonth
+
+            birthMonth = birthParts?.getOrNull(1)
+                ?.toIntOrNull()
+                ?.coerceIn(1, 12)
+                ?: birthMonth
+
             val maxDay = daysInMonth(birthYear, birthMonth)
-            birthDay = (birthParts?.getOrNull(2)?.toIntOrNull() ?: birthDay).coerceIn(1, maxDay)
 
-            heightCm = (doc.getDouble("heightCm") ?: heightCm.toDouble()).toInt().coerceIn(120, 220)
+            birthDay = (birthParts?.getOrNull(2)?.toIntOrNull() ?: birthDay)
+                .coerceIn(1, maxDay)
 
-            val weightValue = (doc.getDouble("weightKg") ?: (weightInt + weightDec / 10.0)).coerceIn(30.0, 150.0)
+            heightCm = (doc.getDouble("heightCm") ?: heightCm.toDouble())
+                .toInt()
+                .coerceIn(120, 220)
+
+            val weightValue = (doc.getDouble("weightKg")
+                ?: (weightInt + weightDec / 10.0))
+                .coerceIn(30.0, 150.0)
+
             weightInt = weightValue.toInt()
             weightDec = ((weightValue * 10).roundToInt() % 10).coerceIn(0, 9)
 
-            val goalValue = (doc.getDouble("dailyGoalKm") ?: (goalInt + goalDec / 10.0)).coerceIn(0.0, 30.0)
+            val goalValue = (doc.getDouble("dailyGoalKm")
+                ?: (goalInt + goalDec / 10.0))
+                .coerceIn(0.0, 30.0)
+
             goalInt = goalValue.toInt()
             goalDec = ((goalValue * 10).roundToInt() % 10).coerceIn(0, 9)
+
             gender = doc.getString("gender") ?: "미설정"
         }
     }
@@ -2632,7 +2679,9 @@ private fun ProfileEditScreen(
             TopAppBar(
                 title = { Text("프로필 변경") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("뒤로") }
+                    TextButton(onClick = onBack) {
+                        Text("뒤로")
+                    }
                 }
             )
         }
@@ -2646,15 +2695,17 @@ private fun ProfileEditScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (!profileUrl.isNullOrBlank()) {
+            if (!profileState.profileUrl.isNullOrBlank()) {
                 Image(
-                    painter = rememberAsyncImagePainter(profileUrl),
+                    painter = rememberAsyncImagePainter(profileState.profileUrl),
                     contentDescription = "프로필",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(110.dp)
                         .clip(CircleShape)
-                        .clickable { pickImage.launch("image/*") }
+                        .clickable(enabled = !profileState.isUploading) {
+                            pickImage.launch("image/*")
+                        }
                 )
             } else {
                 Box(
@@ -2662,40 +2713,59 @@ private fun ProfileEditScreen(
                         .size(110.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFF0F0EE))
-                        .clickable { pickImage.launch("image/*") },
+                        .clickable(enabled = !profileState.isUploading) {
+                            pickImage.launch("image/*")
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("사진 변경")
+                    Text(
+                        if (profileState.isUploading) "업로드 중..."
+                        else "사진 변경"
+                    )
                 }
             }
 
             Spacer(Modifier.height(18.dp))
 
-            OutlinedTextField(value = nickname, onValueChange = { nickname = it }, label = { Text("이름") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = nickname,
+                onValueChange = { nickname = it },
+                label = { Text("이름") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Spacer(Modifier.height(10.dp))
+
             ProfilePickerField(
                 label = "생년월일",
                 valueText = "%04d-%02d-%02d".format(birthYear, birthMonth, birthDay),
                 onClick = { showBirthYearPicker = true }
             )
+
             Spacer(Modifier.height(10.dp))
+
             ProfilePickerField(
                 label = "키",
                 valueText = "${heightCm}cm",
                 onClick = { showHeightPicker = true }
             )
+
             Spacer(Modifier.height(10.dp))
+
             ProfilePickerField(
                 label = "몸무게",
                 valueText = "${weightInt}.${weightDec}kg",
                 onClick = { showWeightPicker = true }
             )
+
             Spacer(Modifier.height(10.dp))
+
             ProfilePickerField(
                 label = "일일 러닝 목표",
                 valueText = "${goalInt}.${goalDec}km",
                 onClick = { showDailyGoalPicker = true }
             )
+
             Spacer(Modifier.height(10.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2712,39 +2782,27 @@ private fun ProfileEditScreen(
 
             Button(
                 onClick = {
-                    if (uid == null || saving) return@Button
-                    saving = true
-                    scope.launch {
-                        runCatching {
-                            val data = mutableMapOf<String, Any>(
-                                "nickname" to nickname.trim(),
-                                "birthDate" to "%04d-%02d-%02d".format(birthYear, birthMonth, birthDay),
-                                "birthYear" to birthYear,
-                                "gender" to gender,
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                            profileUrl?.takeIf { it.isNotBlank() }?.let { data["profileUrl"] = it }
-                            data["heightCm"] = heightCm.toDouble()
-                            data["weightKg"] = (weightInt + (weightDec / 10.0))
-                            data["dailyGoalKm"] = String.format(
-                                java.util.Locale.getDefault(),
-                                "%.1f",
-                                goalInt + (goalDec / 10.0)
-                            ).toDouble()
-                            db.collection("users").document(uid).set(data, SetOptions.merge()).await()
-                        }.onSuccess {
-                            Toast.makeText(context, "프로필 저장 완료", Toast.LENGTH_SHORT).show()
-                            onBack()
-                        }.onFailure {
-                            Toast.makeText(context, "저장 실패", Toast.LENGTH_SHORT).show()
-                        }
-                        saving = false
-                    }
+                    viewModel.saveProfile(
+                        nickname = nickname,
+                        birthYear = birthYear,
+                        birthMonth = birthMonth,
+                        birthDay = birthDay,
+                        gender = gender,
+                        heightCm = heightCm,
+                        weightKg = weightInt + (weightDec / 10.0),
+                        dailyGoalKm = goalInt + (goalDec / 10.0)
+                    )
                 },
-                enabled = !saving,
+                enabled = !profileState.isSaving && !profileState.isUploading,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (saving) "저장 중..." else "저장")
+                Text(
+                    when {
+                        profileState.isUploading -> "이미지 업로드 중..."
+                        profileState.isSaving -> "저장 중..."
+                        else -> "저장"
+                    }
+                )
             }
         }
 
@@ -4388,50 +4446,112 @@ data class AchievementUiModel(
     val unlocked: Boolean
 )
 
+private fun hasSevenDayRunStreak(runs: List<RunSummaryRef>): Boolean {
+    if (runs.size < 7) return false
+
+    val runDays = runs.map { run ->
+        java.util.Calendar.getInstance().apply {
+            timeInMillis = run.endAt
+        }.let { cal ->
+            cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR)
+        }
+    }.toSet()
+
+    return runDays.any { startDayKey ->
+        val startYear = startDayKey / 1000
+        val startDay = startDayKey % 1000
+
+        val cal = java.util.Calendar.getInstance().apply {
+            clear()
+            set(java.util.Calendar.YEAR, startYear)
+            set(java.util.Calendar.DAY_OF_YEAR, startDay)
+        }
+
+        (0 until 7).all {
+            val key = cal.get(java.util.Calendar.YEAR) * 1000 +
+                    cal.get(java.util.Calendar.DAY_OF_YEAR)
+
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+
+            key in runDays
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AchievementScreen(
+private fun AchievementScreen(
     padding: PaddingValues,
+    runs: List<RunSummaryRef>,
     onBack: () -> Unit
 ) {
-    val achievements = remember {
-        listOf(
-            AchievementUiModel(
-                title = "첫 러닝 스타터",
-                description = "첫 러닝을 완료했어요",
-                unlocked = true
-            ),
-            AchievementUiModel(
-                title = "백만 불 짜리 다리",
-                description = "누적 거리 100km 달성",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "꾸준한 러너",
-                description = "7일 연속 러닝 달성",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "새벽의 질주자",
-                description = "오전 6시 이전 러닝 5회",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "커뮤니티 입문자",
-                description = "게시글 첫 작성 완료",
-                unlocked = true
-            )
-        )
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = remember { FirebaseAuth.getInstance().currentUser?.uid }
+    var myPostCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(uid) {
+        val currentUid = uid ?: return@LaunchedEffect
+
+        try {
+            val snapshot = db.collection("posts")
+                .whereEqualTo("userId", currentUid)
+                .get()
+                .await()
+
+            myPostCount = snapshot.size()
+        } catch (_: Exception) {
+            myPostCount = 0
+        }
     }
 
+    val totalDistanceM = runs.sumOf { it.distanceM }
+
+    val earlyMorningRunCount = runs.count { run ->
+        java.util.Calendar.getInstance().apply {
+            timeInMillis = run.endAt
+        }.get(java.util.Calendar.HOUR_OF_DAY) < 6
+    }
+
+    val achievements = listOf(
+        AchievementUiModel(
+            title = "첫 러닝 스타터",
+            description = "첫 러닝을 완료했어요",
+            unlocked = runs.isNotEmpty()
+        ),
+        AchievementUiModel(
+            title = "백만 불 짜리 다리",
+            description = "누적 거리 100km 달성",
+            unlocked = totalDistanceM >= 100_000.0
+        ),
+        AchievementUiModel(
+            title = "꾸준한 러너",
+            description = "7일 연속 러닝 달성",
+            unlocked = hasSevenDayRunStreak(runs)
+        ),
+        AchievementUiModel(
+            title = "새벽의 질주자",
+            description = "오전 6시 이전 러닝 5회",
+            unlocked = earlyMorningRunCount >= 5
+        ),
+        AchievementUiModel(
+            title = "커뮤니티 입문자",
+            description = "게시글 첫 작성 완료",
+            unlocked = myPostCount > 0
+        )
+    )
+
     val unlockedCount = achievements.count { it.unlocked }
+    val representativeTitle =
+        achievements.lastOrNull { it.unlocked }?.title ?: "아직 획득한 칭호가 없어요"
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("업적") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("뒤로") }
+                    TextButton(onClick = onBack) {
+                        Text("뒤로")
+                    }
                 }
             )
         }
@@ -4460,14 +4580,18 @@ fun AchievementScreen(
                             fontSize = 13.sp,
                             color = Color(0xFF6750A4)
                         )
+
                         Spacer(modifier = Modifier.height(6.dp))
+
                         Text(
-                            text = "첫 러닝 스타터",
+                            text = representativeTitle,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF3D2A73)
                         )
+
                         Spacer(modifier = Modifier.height(8.dp))
+
                         Text(
                             text = "획득 업적 $unlockedCount / ${achievements.size}",
                             fontSize = 14.sp,
@@ -4481,9 +4605,11 @@ fun AchievementScreen(
                 Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (achievement.unlocked) Color(0xFFFAFAF8) else Color(
-                            0xFFF3F3F3
-                        )
+                        containerColor = if (achievement.unlocked) {
+                            Color(0xFFFAFAF8)
+                        } else {
+                            Color(0xFFF3F3F3)
+                        }
                     ),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
@@ -4498,9 +4624,11 @@ fun AchievementScreen(
                                 .size(54.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (achievement.unlocked) Color(0xFFFFF3CD) else Color(
-                                        0xFFE5E5E5
-                                    )
+                                    if (achievement.unlocked) {
+                                        Color(0xFFFFF3CD)
+                                    } else {
+                                        Color(0xFFE5E5E5)
+                                    }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
@@ -4519,7 +4647,9 @@ fun AchievementScreen(
                                 fontSize = 16.sp,
                                 color = if (achievement.unlocked) Color.Black else Color.Gray
                             )
+
                             Spacer(modifier = Modifier.height(4.dp))
+
                             Text(
                                 text = achievement.description,
                                 fontSize = 13.sp,
