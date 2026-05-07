@@ -113,4 +113,5 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.media:media:1.6.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
 }
