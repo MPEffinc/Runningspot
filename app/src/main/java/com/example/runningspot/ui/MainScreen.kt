@@ -18,6 +18,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.SizeTransform
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1888,10 +1890,12 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
     val crewRepo = remember { CrewRepository() }
     var crews by remember { mutableStateOf<List<CrewPost>>(emptyList()) }
     var joinedCrewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var ownerNamesByCrewId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabTitles = listOf("피드", "크루")
     var likingPostIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showCrewActionMenu by remember { mutableStateOf(false) }
     LaunchedEffect(refreshKey) {
 
         // Firestore에서 최신 글 읽기
@@ -1926,6 +1930,17 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         joinedCrewIds = crews.mapNotNull { crew ->
             if (crewRepo.isMember(crew.id)) crew.id else null
         }.toSet()
+        val db = FirebaseFirestore.getInstance()
+        val ownerMap = mutableMapOf<String, String>()
+        crews.forEach { crew ->
+            if (crew.userId.isBlank()) return@forEach
+            val nick = runCatching {
+                db.collection("users").document(crew.userId).get().await()
+                    .getString("nickname")
+            }.getOrNull()
+            ownerMap[crew.id] = nick?.takeIf { it.isNotBlank() } ?: "알 수 없음"
+        }
+        ownerNamesByCrewId = ownerMap
     }
 
     // 돌아올 때 새로고침
@@ -1936,6 +1951,29 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    fun openCrewDetail(crewId: String) {
+        val intent = Intent(context, CommunityActivity::class.java)
+        intent.putExtra("isCrewDetailMode", true)
+        intent.putExtra("crewId", crewId)
+        context.startActivity(intent)
+    }
+
+    fun openPostWrite() {
+        val intent = Intent(context, CommunityActivity::class.java)
+        intent.putExtra("isWriteMode", true)
+        intent.putExtra("writeType", "post")
+        intent.putExtra("userName", userName)
+        context.startActivity(intent)
+    }
+
+    fun openCrewWrite() {
+        val intent = Intent(context, CommunityActivity::class.java)
+        intent.putExtra("isWriteMode", true)
+        intent.putExtra("writeType", "crew")
+        intent.putExtra("userName", userName)
+        context.startActivity(intent)
     }
 
     // 전체 화면
@@ -1976,12 +2014,6 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             }
 
             Spacer(Modifier.height(12.dp))
-            fun openChat(crewId: String) {
-                val intent = Intent(context, CommunityActivity::class.java)
-                intent.putExtra("isChatMode", true)
-                intent.putExtra("crewId", crewId)
-                context.startActivity(intent)
-            }
             // 크루 탭
             if (selectedTab == 1) {
 
@@ -1989,6 +2021,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(crews, key = { it.id }) { crew ->
@@ -1996,30 +2029,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                         CrewPostCard(
                             crew = crew,
                             isJoined = joinedCrewIds.contains(crew.id),
-                            onEnterChat = { openChat(crew.id) },
-                            onClick = {
-                                scope.launch {
-                                    val ok = crewRepo.isMember(crew.id)
-                                    if (ok) openChat(crew.id)
-                                }
-                            },
-                            onJoin = {
-                                scope.launch {
-                                    try {
-                                        crewRepo.joinCrew(crew.id)
-                                        crews = crewRepo.fetchCrews()
-                                        joinedCrewIds = joinedCrewIds + crew.id
-                                        openChat(crew.id)
-
-                                    } catch (e: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            e.message ?: "참여 실패",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            }
+                            ownerName = ownerNamesByCrewId[crew.id],
+                            onClick = { openCrewDetail(crew.id) }
                         )
                     }
                 }
@@ -2030,6 +2041,7 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                     Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(posts, key = { it.id }) { post ->
@@ -2228,60 +2240,50 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             }
         }
 
-        var showWritePicker by remember { mutableStateOf(false) }
-
 // FAB
         FloatingActionButton(
-            onClick = { showWritePicker = true },
+            onClick = {
+                if (selectedTab == 0) {
+                    openPostWrite()
+                } else {
+                    showCrewActionMenu = true
+                }
+            },
             containerColor = Color(0xFF204996),
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(20.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "추가", tint = Color(0xFFFAFAF8))
+            Icon(
+                imageVector = if (selectedTab == 0) Icons.Default.Edit else Icons.Default.Add,
+                contentDescription = if (selectedTab == 0) "피드 작성" else "크루 메뉴",
+                tint = Color(0xFFFAFAF8)
+            )
         }
 
-// ✅ 선택 다이얼로그
-        if (showWritePicker) {
+// ✅ 크루 탭 메뉴 다이얼로그
+        if (showCrewActionMenu) {
             AlertDialog(
                 containerColor = DialogContainer,
                 titleContentColor = DialogTitle,
                 textContentColor = DialogText,
-                onDismissRequest = { showWritePicker = false },
-                title = { Text("무엇을 작성할까요?") },
+                onDismissRequest = { showCrewActionMenu = false },
+                title = { Text("크루 메뉴") },
                 text = {
                     Column {
                         Button(
                             onClick = {
-                                showWritePicker = false
-                                val intent = Intent(context, CommunityActivity::class.java)
-                                intent.putExtra("isWriteMode", true)
-                                intent.putExtra("writeType", "post")   // ✅ 추가
-                                intent.putExtra("userName", userName)
-                                context.startActivity(intent)
+                                showCrewActionMenu = false
+                                openCrewWrite()
                             },
                             modifier = Modifier.fillMaxWidth()
-                        ) { Text("피드 쓰기") }
-
-                        Spacer(Modifier.height(10.dp))
-
-                        Button(
-                            onClick = {
-                                showWritePicker = false
-                                val intent = Intent(context, CommunityActivity::class.java)
-                                intent.putExtra("isWriteMode", true)
-                                intent.putExtra("writeType", "crew")   // ✅ 추가
-                                intent.putExtra("userName", userName)
-                                context.startActivity(intent)
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("크루 모집글 쓰기") }
+                        ) { Text("크루 생성하기") }
                     }
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showWritePicker = false }) { Text("취소") }
+                    TextButton(onClick = { showCrewActionMenu = false }) { Text("취소") }
                 }
             )
         }
@@ -2292,12 +2294,14 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
 fun CrewPostCard(
     crew: CrewPost,
     isJoined: Boolean,
-    onEnterChat: () -> Unit,
-    onClick: () -> Unit,
-    onJoin: () -> Unit
+    ownerName: String?,
+    onClick: () -> Unit
 ) {
     val isClosed = crew.currentMembers >= crew.maxMembers
-    val cardColor = if (!isJoined && isClosed) Color(0xFFF0F0EE) else Color(0xFFFAFAF8)
+    val isDisabledClosed = !isJoined && isClosed
+    val cardColor = if (isDisabledClosed) Color(0xFFE4E4E1) else Color(0xFFFAFAF8)
+    val titleColor = if (isDisabledClosed) Color(0xFF8F8F8B) else Color(0xFF1A1A1A)
+    val subColor = if (isDisabledClosed) Color(0xFFA1A19D) else Color(0xFF2A2A2A)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2307,37 +2311,49 @@ fun CrewPostCard(
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(crew.title, fontWeight = FontWeight.Bold, color = Color(0xFF1A1A1A))
-            Text(crew.location, color = Color(0xFF2A2A2A))
-
-            Spacer(Modifier.height(8.dp))
-
-            Text("${crew.currentMembers}/${crew.maxMembers}")
-
-            Spacer(Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    when {
-                        isJoined -> onEnterChat()
-                        !isClosed -> onJoin()
-                    }
-                },
-                enabled = isJoined || !isClosed,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isJoined) Color(0xFFF1B243) else Color(0xFF204996),
-                    contentColor = if (isJoined) Color(0xFF1A1A1A) else Color(0xFFFAFAF8),
-                    disabledContainerColor = Color(0xFF2A2A2A),
-                    disabledContentColor = Color(0xFFF0F0EE)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(crew.title, fontWeight = FontWeight.Bold, color = titleColor)
+                    Spacer(Modifier.height(2.dp))
+                    Text("주 활동: ${crew.location}", color = subColor, fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text("크루장: ${ownerName ?: "알 수 없음"}", color = subColor, fontSize = 12.sp)
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "크루 상세 이동",
+                    tint = if (isDisabledClosed) Color(0xFF9D9D99) else Color(0xFF7A7A76)
                 )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    if (isJoined)
-                        "채팅 참여"
-                    else if (isClosed)
-                        "모집 마감"
-                    else
-                        "참여하기"
+                    text = "크루원 ${crew.currentMembers}/${crew.maxMembers}",
+                    color = subColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = when {
+                        isJoined -> "참여 중"
+                        isClosed -> "모집 마감"
+                        else -> "모집 중"
+                    },
+                    color = when {
+                        isJoined -> Color(0xFF2C7A2C)
+                        isClosed -> Color(0xFF8F8F8B)
+                        else -> Color(0xFF204996)
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
                 )
             }
         }
@@ -2737,6 +2753,45 @@ private data class AchievementUiModel(
     val badgeEmoji: String
 )
 
+private val achievementCategoryOrder = listOf(
+    "러닝 횟수",
+    "거리",
+    "연속",
+    "러닝 스타일",
+    "시간",
+    "페이스",
+    "커뮤니티"
+)
+
+private fun achievementCategoryLabel(id: String): String {
+    return when {
+        id.startsWith("run_") -> "러닝 횟수"
+        id.startsWith("dist_") -> "거리"
+        id.startsWith("streak_") -> "연속"
+        id.startsWith("time_") -> "시간"
+        id.startsWith("pace_") -> "페이스"
+        id.startsWith("post_") -> "커뮤니티"
+        id.startsWith("dawn_") || id.startsWith("night_") || id.startsWith("weekend_")
+                || id.startsWith("long5_") || id.startsWith("long10_") || id.startsWith("half_") -> "러닝 스타일"
+        else -> "기타"
+    }
+}
+
+private data class AchievementStats(
+    val totalRuns: Int,
+    val totalDistanceKm: Double,
+    val maxStreakDays: Int,
+    val dawnRuns: Int,
+    val nightRuns: Int,
+    val weekendRuns: Int,
+    val longRuns5Km: Int,
+    val longRuns10Km: Int,
+    val halfMarathonRuns: Int,
+    val totalDurationMinutes: Int,
+    val bestPaceSecPerKm: Double?,
+    val postCount: Int
+)
+
 private fun dayStartMillis(timeMs: Long): Long {
     val cal = java.util.Calendar.getInstance().apply {
         timeInMillis = timeMs
@@ -2767,55 +2822,130 @@ private fun calculateMaxStreakDays(runs: List<RunSummaryRef>): Int {
     return maxStreak
 }
 
+private fun buildAchievementStats(
+    runs: List<RunSummaryRef>,
+    postCount: Int
+): AchievementStats {
+    var dawnRuns = 0
+    var nightRuns = 0
+    var weekendRuns = 0
+    var longRuns5Km = 0
+    var longRuns10Km = 0
+    var halfMarathonRuns = 0
+    var bestPaceSecPerKm: Double? = null
+
+    runs.forEach { run ->
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = run.endAt }
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val dayOfWeek = cal.get(java.util.Calendar.DAY_OF_WEEK)
+
+        if (hour < 6) dawnRuns += 1
+        if (hour >= 22 || hour < 5) nightRuns += 1
+        if (dayOfWeek == java.util.Calendar.SATURDAY || dayOfWeek == java.util.Calendar.SUNDAY) {
+            weekendRuns += 1
+        }
+
+        val distanceKm = run.distanceM / 1000.0
+        if (distanceKm >= 5.0) longRuns5Km += 1
+        if (distanceKm >= 10.0) longRuns10Km += 1
+        if (distanceKm >= 21.097) halfMarathonRuns += 1
+
+        val pace = calcPace(run.distanceM, run.durationMs)
+        if (pace != null) {
+            bestPaceSecPerKm = when {
+                bestPaceSecPerKm == null -> pace
+                pace < bestPaceSecPerKm!! -> pace
+                else -> bestPaceSecPerKm
+            }
+        }
+    }
+
+    val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
+    val totalDurationMinutes = (runs.sumOf { it.durationMs } / 60_000L).toInt()
+
+    return AchievementStats(
+        totalRuns = runs.size,
+        totalDistanceKm = totalDistanceKm,
+        maxStreakDays = calculateMaxStreakDays(runs),
+        dawnRuns = dawnRuns,
+        nightRuns = nightRuns,
+        weekendRuns = weekendRuns,
+        longRuns5Km = longRuns5Km,
+        longRuns10Km = longRuns10Km,
+        halfMarathonRuns = halfMarathonRuns,
+        totalDurationMinutes = totalDurationMinutes,
+        bestPaceSecPerKm = bestPaceSecPerKm,
+        postCount = postCount
+    )
+}
+
 private fun buildAchievementModels(
     runs: List<RunSummaryRef>,
     postCount: Int
 ): List<AchievementUiModel> {
-    val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
-    val maxStreakDays = calculateMaxStreakDays(runs)
-    val dawnRuns = runs.count {
-        val hour = java.util.Calendar.getInstance().apply {
-            timeInMillis = it.endAt
-        }.get(java.util.Calendar.HOUR_OF_DAY)
-        hour < 6
-    }
+    val s = buildAchievementStats(runs = runs, postCount = postCount)
+    fun paceAtMost(sec: Double): Boolean = s.bestPaceSecPerKm?.let { it <= sec } == true
 
     return listOf(
-        AchievementUiModel(
-            id = "first_run",
-            title = "첫 러닝 스타터",
-            description = "첫 러닝을 완료했어요",
-            unlocked = runs.isNotEmpty(),
-            badgeEmoji = "\uD83C\uDFC3"
-        ),
-        AchievementUiModel(
-            id = "distance_100",
-            title = "백만 불 짜리 다리",
-            description = "누적 거리 100km 달성",
-            unlocked = totalDistanceKm >= 100.0,
-            badgeEmoji = "\uD83D\uDCAA"
-        ),
-        AchievementUiModel(
-            id = "streak_7",
-            title = "꾸준한 러너",
-            description = "7일 연속 러닝 달성",
-            unlocked = maxStreakDays >= 7,
-            badgeEmoji = "\uD83D\uDD25"
-        ),
-        AchievementUiModel(
-            id = "dawn_5",
-            title = "새벽의 질주자",
-            description = "오전 6시 이전 러닝 5회",
-            unlocked = dawnRuns >= 5,
-            badgeEmoji = "\uD83C\uDF05"
-        ),
-        AchievementUiModel(
-            id = "community_first",
-            title = "커뮤니티 입문자",
-            description = "게시글 첫 작성 완료",
-            unlocked = postCount >= 1,
-            badgeEmoji = "\uD83D\uDCAC"
-        )
+        AchievementUiModel("run_001", "첫 러닝 스타터", "러닝 1회 달성", s.totalRuns >= 1, "\uD83C\uDFC3"),
+        AchievementUiModel("run_003", "러닝 새싹", "러닝 3회 달성", s.totalRuns >= 3, "\uD83C\uDF31"),
+        AchievementUiModel("run_005", "워밍업 완료", "러닝 5회 달성", s.totalRuns >= 5, "\uD83D\uDD25"),
+        AchievementUiModel("run_010", "루틴 입문", "러닝 10회 달성", s.totalRuns >= 10, "\uD83D\uDD01"),
+        AchievementUiModel("run_020", "발걸음 수집가", "러닝 20회 달성", s.totalRuns >= 20, "\uD83E\uDDB6"),
+        AchievementUiModel("run_030", "러닝 생활자", "러닝 30회 달성", s.totalRuns >= 30, "\uD83D\uDC5F"),
+        AchievementUiModel("run_050", "탄탄한 러너", "러닝 50회 달성", s.totalRuns >= 50, "\uD83C\uDFC5"),
+        AchievementUiModel("run_080", "러닝 중독자", "러닝 80회 달성", s.totalRuns >= 80, "\uD83D\uDE80"),
+        AchievementUiModel("run_120", "백이십 클럽", "러닝 120회 달성", s.totalRuns >= 120, "\uD83C\uDF96"),
+        AchievementUiModel("run_200", "전설의 러너", "러닝 200회 달성", s.totalRuns >= 200, "\uD83D\uDC51"),
+
+        AchievementUiModel("dist_001", "첫 1km", "누적 거리 1km 달성", s.totalDistanceKm >= 1.0, "\uD83D\uDCCD"),
+        AchievementUiModel("dist_005", "5km 워커", "누적 거리 5km 달성", s.totalDistanceKm >= 5.0, "\uD83C\uDFC3"),
+        AchievementUiModel("dist_010", "10km 러너", "누적 거리 10km 달성", s.totalDistanceKm >= 10.0, "\uD83D\uDEB4"),
+        AchievementUiModel("dist_021", "하프 첫걸음", "누적 거리 21.1km 달성", s.totalDistanceKm >= 21.1, "\uD83C\uDFC1"),
+        AchievementUiModel("dist_042", "마라톤 첫걸음", "누적 거리 42.2km 달성", s.totalDistanceKm >= 42.2, "\uD83D\uDCAF"),
+        AchievementUiModel("dist_060", "도시 한 바퀴", "누적 거리 60km 달성", s.totalDistanceKm >= 60.0, "\uD83C\uDF06"),
+        AchievementUiModel("dist_100", "백만 불 짜리 다리", "누적 거리 100km 달성", s.totalDistanceKm >= 100.0, "\uD83D\uDCAA"),
+        AchievementUiModel("dist_150", "강철 종아리", "누적 거리 150km 달성", s.totalDistanceKm >= 150.0, "\uD83E\uDDBE"),
+        AchievementUiModel("dist_250", "장거리 장인", "누적 거리 250km 달성", s.totalDistanceKm >= 250.0, "\uD83D\uDEE3"),
+        AchievementUiModel("dist_500", "지구력 마스터", "누적 거리 500km 달성", s.totalDistanceKm >= 500.0, "\uD83C\uDF0D"),
+
+        AchievementUiModel("streak_002", "이틀의 시작", "2일 연속 러닝", s.maxStreakDays >= 2, "\uD83D\uDCC5"),
+        AchievementUiModel("streak_003", "삼일 챌린저", "3일 연속 러닝", s.maxStreakDays >= 3, "\uD83D\uDCC6"),
+        AchievementUiModel("streak_005", "주간 워밍업", "5일 연속 러닝", s.maxStreakDays >= 5, "\uD83D\uDD5B"),
+        AchievementUiModel("streak_007", "꾸준한 러너", "7일 연속 러닝", s.maxStreakDays >= 7, "\uD83D\uDD25"),
+        AchievementUiModel("streak_010", "10일 루틴", "10일 연속 러닝", s.maxStreakDays >= 10, "\uD83D\uDCAA"),
+        AchievementUiModel("streak_014", "2주 완주", "14일 연속 러닝", s.maxStreakDays >= 14, "\uD83C\uDFC6"),
+
+        AchievementUiModel("dawn_001", "새벽 한 걸음", "오전 6시 이전 러닝 1회", s.dawnRuns >= 1, "\uD83C\uDF05"),
+        AchievementUiModel("dawn_003", "아침형 러너", "오전 6시 이전 러닝 3회", s.dawnRuns >= 3, "\u2600\uFE0F"),
+        AchievementUiModel("dawn_005", "새벽의 질주자", "오전 6시 이전 러닝 5회", s.dawnRuns >= 5, "\uD83C\uDF04"),
+        AchievementUiModel("dawn_010", "해 뜨기 전 마스터", "오전 6시 이전 러닝 10회", s.dawnRuns >= 10, "\uD83C\uDF1E"),
+        AchievementUiModel("night_003", "야간 순찰대", "오후 10시 이후 러닝 3회", s.nightRuns >= 3, "\uD83C\uDF19"),
+        AchievementUiModel("weekend_005", "주말 러너", "주말 러닝 5회", s.weekendRuns >= 5, "\uD83C\uDFD6"),
+
+        AchievementUiModel("long5_001", "5km 첫 완주", "5km 이상 러닝 1회", s.longRuns5Km >= 1, "\uD83C\uDFC1"),
+        AchievementUiModel("long5_003", "5km 반복자", "5km 이상 러닝 3회", s.longRuns5Km >= 3, "\uD83D\uDD04"),
+        AchievementUiModel("long5_005", "5km 전문가", "5km 이상 러닝 5회", s.longRuns5Km >= 5, "\uD83D\uDEB6"),
+        AchievementUiModel("long10_001", "10km 첫 완주", "10km 이상 러닝 1회", s.longRuns10Km >= 1, "\uD83C\uDFC3"),
+        AchievementUiModel("long10_003", "10km 단골", "10km 이상 러닝 3회", s.longRuns10Km >= 3, "\uD83E\uDDF1"),
+        AchievementUiModel("half_001", "하프 완주자", "21.1km 이상 러닝 1회", s.halfMarathonRuns >= 1, "\uD83C\uDFC5"),
+
+        AchievementUiModel("time_060", "한 시간 러너", "누적 러닝 60분", s.totalDurationMinutes >= 60, "\u23F1\uFE0F"),
+        AchievementUiModel("time_180", "3시간 달성", "누적 러닝 180분", s.totalDurationMinutes >= 180, "\u231B"),
+        AchievementUiModel("time_300", "5시간 달성", "누적 러닝 300분", s.totalDurationMinutes >= 300, "\u23F0"),
+        AchievementUiModel("time_600", "10시간 달성", "누적 러닝 600분", s.totalDurationMinutes >= 600, "\uD83D\uDD5C"),
+        AchievementUiModel("time_1200", "20시간 달성", "누적 러닝 1200분", s.totalDurationMinutes >= 1200, "\uD83D\uDD50"),
+
+        AchievementUiModel("pace_730", "페이스 입문", "최고 페이스 7'30\"/km 이하", paceAtMost(450.0), "\uD83C\uDFC3"),
+        AchievementUiModel("pace_700", "스피드 업", "최고 페이스 7'00\"/km 이하", paceAtMost(420.0), "\u26A1"),
+        AchievementUiModel("pace_630", "빠른 발", "최고 페이스 6'30\"/km 이하", paceAtMost(390.0), "\uD83D\uDCA8"),
+        AchievementUiModel("pace_600", "스프린트 감각", "최고 페이스 6'00\"/km 이하", paceAtMost(360.0), "\uD83D\uDE80"),
+
+        AchievementUiModel("post_001", "커뮤니티 입문자", "게시글 1개 작성", s.postCount >= 1, "\uD83D\uDCAC"),
+        AchievementUiModel("post_003", "소통 시작", "게시글 3개 작성", s.postCount >= 3, "\uD83D\uDCDD"),
+        AchievementUiModel("post_005", "공유 러너", "게시글 5개 작성", s.postCount >= 5, "\uD83D\uDCE3"),
+        AchievementUiModel("post_010", "콘텐츠 러너", "게시글 10개 작성", s.postCount >= 10, "\uD83D\uDCDA"),
+        AchievementUiModel("post_020", "커뮤니티 리더", "게시글 20개 작성", s.postCount >= 20, "\uD83C\uDF93")
     )
 }
 
@@ -2853,6 +2983,26 @@ private fun AchievementScreen(
 
     val achievements = remember(runs, postCount) {
         buildAchievementModels(runs = runs, postCount = postCount)
+    }
+    val categoryFilters = remember {
+        listOf(
+            "전체",
+            "러닝 횟수",
+            "거리",
+            "연속",
+            "러닝 스타일",
+            "시간",
+            "페이스",
+            "커뮤니티"
+        )
+    }
+    var selectedCategory by rememberSaveable { mutableStateOf("전체") }
+    val visibleAchievements = remember(achievements, selectedCategory) {
+        if (selectedCategory == "전체") {
+            achievements
+        } else {
+            achievements.filter { achievementCategoryLabel(it.id) == selectedCategory }
+        }
     }
 
     val unlockedCount = achievements.count { it.unlocked }
@@ -2936,81 +3086,108 @@ private fun AchievementScreen(
                 }
             }
 
-            items(items = achievements, key = { it.id }) { achievement ->
-                val isSelectedBadge = achievement.unlocked && achievement.title == representativeTitle
-                Card(
-                    modifier = Modifier.clickable(
-                        enabled = achievement.unlocked && !isSelectedBadge && !isSavingBadge
-                    ) {
-                        setRepresentativeBadge(achievement.title)
-                    },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (achievement.unlocked) Color(0xFFFAFAF8) else Color(0xFFF3F3F3)
-                    ),
-                    elevation = CardDefaults.cardElevation(2.dp)
+            item {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(54.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (achievement.unlocked) Color(0xFFFFF3CD) else Color(0xFFE5E5E5)
-                                ),
-                            contentAlignment = Alignment.Center
+                    items(categoryFilters) { category ->
+                        FilterChip(
+                            selected = selectedCategory == category,
+                            onClick = { selectedCategory = category },
+                            label = { Text(category) }
+                        )
+                    }
+                }
+            }
+
+            achievementCategoryOrder.forEach { category ->
+                val section = visibleAchievements.filter { achievementCategoryLabel(it.id) == category }
+                if (section.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = category,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF2A2A2A)
+                        )
+                    }
+                    items(items = section, key = { it.id }) { achievement ->
+                        val isSelectedBadge = achievement.unlocked && achievement.title == representativeTitle
+                        Card(
+                            modifier = Modifier.clickable(
+                                enabled = achievement.unlocked && !isSelectedBadge && !isSavingBadge
+                            ) {
+                                setRepresentativeBadge(achievement.title)
+                            },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (achievement.unlocked) Color(0xFFFAFAF8) else Color(0xFFF3F3F3)
+                            ),
+                            elevation = CardDefaults.cardElevation(2.dp)
                         ) {
-                            Text(
-                                text = if (achievement.unlocked) achievement.badgeEmoji else "🔒",
-                                fontSize = 24.sp
-                            )
-                        }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (achievement.unlocked) Color(0xFFFFF3CD) else Color(0xFFE5E5E5)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (achievement.unlocked) achievement.badgeEmoji else "🔒",
+                                        fontSize = 24.sp
+                                    )
+                                }
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                                Spacer(modifier = Modifier.width(14.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = achievement.title,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = if (achievement.unlocked) Color.Black else Color.Gray
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = achievement.description,
-                                fontSize = 13.sp,
-                                color = Color.Gray
-                            )
-                        }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = achievement.title,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = if (achievement.unlocked) Color.Black else Color.Gray
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = achievement.description,
+                                        fontSize = 13.sp,
+                                        color = Color.Gray
+                                    )
+                                }
 
-                        if (achievement.unlocked) {
-                            if (isSelectedBadge) {
-                                Text(
-                                    text = "대표 배지",
-                                    color = Color(0xFF6750A4),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                )
-                            } else {
-                                Text(
-                                    text = "설정",
-                                    color = Color(0xFF6750A4),
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp
-                                )
+                                if (achievement.unlocked) {
+                                    if (isSelectedBadge) {
+                                        Text(
+                                            text = "대표 배지",
+                                            color = Color(0xFF6750A4),
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "설정",
+                                            color = Color(0xFF6750A4),
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "미달성",
+                                        color = Color.Gray,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                }
                             }
-                        } else {
-                            Text(
-                                text = "미달성",
-                                color = Color.Gray,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
                         }
                     }
                 }
@@ -3052,7 +3229,7 @@ private fun ProfileEditScreen(
     var showWeightPicker by remember { mutableStateOf(false) }
     var showDailyGoalPicker by remember { mutableStateOf(false) }
 
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null || uid == null) return@rememberLauncherForActivityResult
         scope.launch {
             runCatching {
@@ -3122,7 +3299,11 @@ private fun ProfileEditScreen(
                     modifier = Modifier
                         .size(110.dp)
                         .clip(CircleShape)
-                        .clickable { pickImage.launch("image/*") }
+                        .clickable {
+                            pickImage.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
                 )
             } else {
                 Box(
@@ -3130,7 +3311,11 @@ private fun ProfileEditScreen(
                         .size(110.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFF0F0EE))
-                        .clickable { pickImage.launch("image/*") },
+                        .clickable {
+                            pickImage.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text("사진 변경")

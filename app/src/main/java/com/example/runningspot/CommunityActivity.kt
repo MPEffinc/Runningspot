@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
@@ -69,12 +71,17 @@ import com.example.runningspot.ui.theme.DialogTitle
 import com.example.runningspot.ui.theme.RunningSpotTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.core.view.WindowCompat
 import com.example.runningspot.data.repository.Comment
 import com.example.runningspot.data.repository.CommunityPostRepository
+import kotlinx.coroutines.tasks.await
 
 class CommunityActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.parseColor("#FAFAF8")
+        WindowCompat.getInsetsController(window, window.decorView)?.isAppearanceLightStatusBars = true
+
         val isCrewDetailMode = intent.getBooleanExtra("isCrewDetailMode", false)
         if (isCrewDetailMode) {
             val crewId = intent.getStringExtra("crewId") ?: run {
@@ -82,7 +89,6 @@ class CommunityActivity : ComponentActivity() {
                 return
             }
             setContent {
-                CrewDetailScreen(crewId = crewId)
                 RunningSpotTheme {
                     CrewDetailScreen(crewId = crewId)
                 }
@@ -116,23 +122,18 @@ class CommunityActivity : ComponentActivity() {
             val initialImageUri = intent.getStringExtra("initialImageUri")
 
             setContent {
-                if (writeType == "crew") {
-                    CrewWriteScreen(userName = userName)
-                } else {
-                    WritePostScreen(userName, prefs) // ✅ 기존 피드 글쓰기 그대로
-                    RunningSpotTheme {
-                        if (writeType == "crew") {
-                            CrewWriteScreen(userName = userName)
-                        } else {
-                            WritePostScreen(
-                                userName = userName,
-                                prefs = prefs,
-                                editDocId = editDocId,
-                                initialTitle = initialTitle,
-                                initialContent = initialContent,
-                                initialImageUri = initialImageUri
-                            )
-                        }
+                RunningSpotTheme {
+                    if (writeType == "crew") {
+                        CrewWriteScreen(userName = userName)
+                    } else {
+                        WritePostScreen(
+                            userName = userName,
+                            prefs = prefs,
+                            editDocId = editDocId,
+                            initialTitle = initialTitle,
+                            initialContent = initialContent,
+                            initialImageUri = initialImageUri
+                        )
                     }
                 }
             }
@@ -357,12 +358,8 @@ fun WritePostScreen(
     var isSubmitting by remember { mutableStateOf(false) }
     //사진 선택 런처
     val imagePicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri != null) {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
                 selectedImageUri = uri
                 previewImageUrl = null
             }
@@ -472,7 +469,13 @@ fun WritePostScreen(
             }
 
             //이미지 미리보기 선택 버튼
-            Button(onClick = { imagePicker.launch(arrayOf("image/*")) }) {
+            Button(
+                onClick = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
+            ) {
                 Text("사진 첨부하기")
             }
 
@@ -713,6 +716,7 @@ fun CommunityDetailScreen(
     }
 
     Scaffold(
+        containerColor = Color(0xFFFAFAF8),
         topBar = {
             TopAppBar(
                 title = { Text("커뮤니티", fontSize = 20.sp) },
@@ -1128,46 +1132,94 @@ fun CrewDetailScreen(
     crewId: String,
     crewRepo: CrewRepository = CrewRepository()
 ) {
+    data class CrewMemberUi(
+        val uid: String,
+        val nickname: String
+    )
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val myUid = FirebaseAuth.getInstance().currentUser?.uid
+    val db = remember { FirebaseFirestore.getInstance() }
+    fun openCrewChat() {
+        val chatIntent = Intent(context, CommunityActivity::class.java).apply {
+            putExtra("isChatMode", true)
+            putExtra("crewId", crewId)
+        }
+        context.startActivity(chatIntent)
+    }
 
     var crew by remember { mutableStateOf<CrewPost?>(null) }
     var isMember by remember { mutableStateOf(false) }
+    var ownerName by remember { mutableStateOf("알 수 없음") }
+    var members by remember { mutableStateOf<List<CrewMemberUi>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+
+    suspend fun refreshCrewState() {
+        crew = crewRepo.fetchCrew(crewId)
+        isMember = crewRepo.isMember(crewId)
+
+        val ownerId = crew?.userId
+        ownerName = if (!ownerId.isNullOrBlank()) {
+            runCatching {
+                db.collection("users")
+                    .document(ownerId)
+                    .get()
+                    .await()
+                    .getString("nickname")
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "알 수 없음"
+        } else {
+            "알 수 없음"
+        }
+
+        val memberDocs = db.collection("crews")
+            .document(crewId)
+            .collection("members")
+            .get()
+            .await()
+            .documents
+
+        val loadedMembers = memberDocs.map { doc ->
+            val uid = doc.id
+            val nick = runCatching {
+                db.collection("users")
+                    .document(uid)
+                    .get()
+                    .await()
+                    .getString("nickname")
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "사용자"
+            CrewMemberUi(uid = uid, nickname = nick)
+        }
+        val ownerUid = crew?.userId
+        members = loadedMembers.sortedWith(
+            compareByDescending<CrewMemberUi> { it.uid == ownerUid }
+                .thenBy { it.nickname }
+        )
+    }
 
     LaunchedEffect(crewId) {
         loading = true
         try {
-            crew = crewRepo.fetchCrew(crewId)          // ✅ 단일 크루 읽기 함수 필요
-            isMember = crewRepo.isMember(crewId)       // ✅ 이미 너가 만든 함수
+            refreshCrewState()
         } finally {
             loading = false
         }
     }
 
     Scaffold(
+        containerColor = Color(0xFFFAFAF8),
         topBar = {
             TopAppBar(
-                title = { Text(crew?.title ?: "크루") },
-                actions = {
-                    // ✅ 탈퇴 버튼을 상단에 두고 싶으면 여기
-                    if (isMember) {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    try {
-                                        crewRepo.leaveCrew(crewId)    // ✅ 탈퇴 함수 필요
-                                        isMember = false
-                                        crew = crewRepo.fetchCrew(crewId)
-                                        Toast.makeText(context, "탈퇴 완료", Toast.LENGTH_SHORT).show()
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, e.message ?: "탈퇴 실패", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        ) { Text("탈퇴", color = Color.Red) }
+                title = {},
+                navigationIcon = {
+                    IconButton(onClick = { (context as? Activity)?.finish() }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "뒤로가기"
+                        )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFAFAF8))
             )
         }
     ) { padding ->
@@ -1192,60 +1244,193 @@ fun CrewDetailScreen(
                 .fillMaxSize()
         ) {
             // ----- 크루 정보 -----
-            Text(c.title, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-            Spacer(Modifier.height(6.dp))
-            Text(c.location, color = Color(0xFF2A2A2A))
-            Spacer(Modifier.height(12.dp))
-            Text(c.description)
-            Spacer(Modifier.height(12.dp))
-            Text("인원: ${c.currentMembers}/${c.maxMembers}", fontWeight = FontWeight.SemiBold)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(c.title, fontWeight = FontWeight.ExtraBold, fontSize = 26.sp, color = Color(0xFF1A1A1A))
+                Spacer(Modifier.height(10.dp))
 
-            Spacer(Modifier.height(12.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
+                    elevation = CardDefaults.cardElevation(0.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("장소: ${c.location}", color = Color(0xFF2A2A2A), fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(c.description, color = Color(0xFF2A2A2A))
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "(${c.currentMembers}/${c.maxMembers})",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF2A2A2A)
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("크루장: $ownerName", fontWeight = FontWeight.SemiBold, color = Color(0xFF2A2A2A))
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAF8)),
+                elevation = CardDefaults.cardElevation(0.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E2DE))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 14.dp)
+                ) {
+                    Text(
+                        text = "크루원 목록",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1A1A1A),
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(Modifier.height(10.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (members.isEmpty()) {
+                            Text("표시할 크루원이 없어요.", color = Color(0xFF6A6A66))
+                        } else {
+                            members.forEach { member ->
+                                val isMe = myUid != null && member.uid == myUid
+                                val isOwnerMember = member.uid == c.userId
+                                Text(
+                                    text = buildString {
+                                        append(member.nickname)
+                                        if (isOwnerMember) append(" (크루장)")
+                                        if (isMe) append(" (나)")
+                                    },
+                                    color = Color(0xFF2A2A2A),
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             // ----- 버튼 영역 -----
             val isFull = c.currentMembers >= c.maxMembers
+            val isOwner = myUid != null && myUid == c.userId
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (isOwner) {
                 Button(
                     onClick = {
                         scope.launch {
                             try {
-                                crewRepo.joinCrew(crewId)
-                                isMember = true
-                                crew = crewRepo.fetchCrew(crewId)
-                                Toast.makeText(context, "참여 완료", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, e.message ?: "참여 실패", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    enabled = !isMember && !isFull,
-                    modifier = Modifier.weight(1f)
-                ) { Text(if (isFull) "모집 마감" else if (isMember) "참여 중" else "참여하기") }
+                                val crewRef = db.collection("crews").document(crewId)
+                                val members = crewRef.collection("members").get().await()
+                                val messages = crewRef.collection("messages").get().await()
 
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            try {
-                                crewRepo.leaveCrew(crewId)
-                                isMember = false
-                                crew = crewRepo.fetchCrew(crewId)
-                                Toast.makeText(context, "탈퇴 완료", Toast.LENGTH_SHORT).show()
+                                db.runBatch { batch ->
+                                    members.documents.forEach { batch.delete(it.reference) }
+                                    messages.documents.forEach { batch.delete(it.reference) }
+                                    batch.delete(crewRef)
+                                }.await()
+
+                                Toast.makeText(context, "크루 해산 완료", Toast.LENGTH_SHORT).show()
+                                (context as? Activity)?.finish()
                             } catch (e: Exception) {
-                                Toast.makeText(context, e.message ?: "탈퇴 실패", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    e.message ?: "크루 해산 실패",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     },
-                    enabled = isMember,
-                    modifier = Modifier.weight(1f)
-                ) { Text("탈퇴하기") }
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFC53D3D),
+                        contentColor = Color(0xFFFAFAF8),
+                    )
+                ) { Text("크루 해산") }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    crewRepo.joinCrew(crewId)
+                                    refreshCrewState()
+                                    Toast.makeText(context, "참여 완료", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message ?: "참여 실패", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = !isMember && !isFull,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (isFull) "모집 마감" else if (isMember) "참여 중" else "참여하기") }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    crewRepo.leaveCrew(crewId)
+                                    refreshCrewState()
+                                    Toast.makeText(context, "탈퇴 완료", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message ?: "탈퇴 실패", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = isMember,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFC53D3D),
+                            contentColor = Color(0xFFFAFAF8),
+                            disabledContainerColor = Color(0xFFB9B9B5),
+                            disabledContentColor = Color(0xFFF0F0EE)
+                        )
+                    ) { Text("탈퇴하기") }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
             Divider()
             Spacer(Modifier.height(10.dp))
 
-            // ----- 채팅 영역: 참여한 사람만 -----
+            if (!isMember) {
+                Text(
+                    text = "크루에 참여한 멤버만 채팅방에 입장할 수 있어요.",
+                    color = Color(0xFF6A6A66),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            Button(
+                onClick = { openCrewChat() },
+                enabled = isMember,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF204996),
+                    contentColor = Color(0xFFFAFAF8),
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFFF0F0EE)
+                )
+            ) {
+                Text(if (isMember) "크루 채팅방 입장" else "크루 참여 후 채팅 가능")
+            }
         }
     }
 }
