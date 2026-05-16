@@ -9,6 +9,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -32,6 +40,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -118,10 +127,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -153,7 +160,6 @@ import com.example.runningspot.ui.theme.DialogText
 import com.example.runningspot.ui.theme.DialogTitle
 
 import androidx.compose.material3.*
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DirectionsRun
@@ -376,6 +382,16 @@ private enum class MyPageSubScreen {
     SettingsInfo
 }
 
+@Composable
+private fun BackNavIconButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "뒤로가기"
+        )
+    }
+}
+
 private fun saveRunSummaryRef(ctx: android.content.Context, item: RunSummaryRef, maxKeep: Int = 200) {
     val sp = ctx.getSharedPreferences(RUN_SP, android.content.Context.MODE_PRIVATE)
     val old = org.json.JSONArray(sp.getString(RUN_KEY, "[]"))
@@ -467,6 +483,7 @@ private fun deleteRunSummaryRef(ctx: android.content.Context, target: RunSummary
 
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     userName: String?,
@@ -523,179 +540,250 @@ fun MainScreen(
             myPageSubScreen = MyPageSubScreen.Main
         }
 
-        when (selectedTab) {
-            0 -> {
-                if (showHistory) {
-                    HistoryList(
-                        padding = padding,
-                        runs = runRefs,
-                        isLoading = isRunHistoryLoading,
-                        userName = userName,
-                        onBack = { showHistory = false },
-                        onSelect = { r ->
-                            lastDistance = r.distanceM
-                            lastDuration = r.durationMs
-                            lastPath = r.pathPairs
-                            lastSteps = r.wearableSteps
-                            lastHeartRate = r.wearableHeartRate
-                            lastCalories = r.wearableCalories
-                            showHistory = false
-                        },
-                        onDelete = { r ->
-                            screenScope.launch {
-                                val runId = r.id
-                                if (runId == null) {
-                                    Toast.makeText(context, "서버 기록 id가 없어 삭제할 수 없어요.", Toast.LENGTH_SHORT).show()
-                                    return@launch
-                                }
-
-                                try {
-                                    runRepository.deleteRun(runId)
-                                    val refreshed = fetchRunSummaryRefs(runRepository)
-                                    runRefs.clear()
-                                    runRefs.addAll(refreshed)
-
-                                    if (runRefs.isNotEmpty()) {
-                                        val first = runRefs.first()
-                                        lastDistance = first.distanceM
-                                        lastDuration = first.durationMs
-                                        lastPath = first.pathPairs
-                                        lastSteps = first.wearableSteps
-                                        lastHeartRate = first.wearableHeartRate
-                                        lastCalories = first.wearableCalories
-                                    } else {
-                                        lastDistance = null
-                                        lastDuration = null
-                                        lastPath = emptyList()
-                                        lastSteps = 0L
-                                        lastHeartRate = 0L
-                                        lastCalories = 0.0
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    )
+        AnimatedContent(
+            modifier = Modifier.fillMaxSize(),
+            targetState = selectedTab,
+            label = "main-tab-transition",
+            transitionSpec = {
+                if (targetState > initialState) {
+                    (slideInHorizontally(
+                        animationSpec = tween(260),
+                        initialOffsetX = { it }
+                    ) + fadeIn(animationSpec = tween(200))).togetherWith(
+                        slideOutHorizontally(
+                            animationSpec = tween(260),
+                            targetOffsetX = { -it / 3 }
+                        ) + fadeOut(animationSpec = tween(180))
+                    ).using(SizeTransform(clip = false))
                 } else {
-                    StatsScreen(
-                        padding = padding,
-                        distance = lastDistance,
-                        duration = lastDuration,
-                        route = lastPath,
-                        steps = lastSteps,
-                        heartRate = lastHeartRate,
-                        calories = lastCalories,
-                        onShowHistory = { showHistory = true }
-                    )
+                    (slideInHorizontally(
+                        animationSpec = tween(260),
+                        initialOffsetX = { -it }
+                    ) + fadeIn(animationSpec = tween(200))).togetherWith(
+                        slideOutHorizontally(
+                            animationSpec = tween(260),
+                            targetOffsetX = { it / 3 }
+                        ) + fadeOut(animationSpec = tween(180))
+                    ).using(SizeTransform(clip = false))
                 }
             }
-            1 -> WeeklyStatsScreen(
-                padding = padding,
-                runs = runRefs
-            )
-            2 -> RunningScreen(
-                padding = padding,
-                viewModel = viewModel,
-                initialLocation = initialLocation,
-                onRunResult = { distance, duration, pathPairs,startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories ->
-                    val endAt = System.currentTimeMillis()
-                    screenScope.launch {
-                        if (pathPairs.size < 2) {
-                            Toast.makeText(context, "경로가 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
+        ) { currentTab ->
+            when (currentTab) {
+                0 -> {
+                    if (showHistory) {
+                        HistoryList(
+                            padding = padding,
+                            runs = runRefs,
+                            isLoading = isRunHistoryLoading,
+                            userName = userName,
+                            onBack = { showHistory = false },
+                            onSelect = { r ->
+                                lastDistance = r.distanceM
+                                lastDuration = r.durationMs
+                                lastPath = r.pathPairs
+                                lastSteps = r.wearableSteps
+                                lastHeartRate = r.wearableHeartRate
+                                lastCalories = r.wearableCalories
+                                showHistory = false
+                            },
+                            onDelete = { r ->
+                                screenScope.launch {
+                                    val runId = r.id
+                                    if (runId == null) {
+                                        Toast.makeText(context, "서버 기록 id가 없어 삭제할 수 없어요.", Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
 
-                        try {
-                            val saveDistance = if (distance > 0.0) {
-                                distance
-                            } else {
-                                pathPairs.zipWithNext().sumOf { (a, b) ->
-                                    distanceMeters(a.first, a.second, b.first, b.second)
+                                    try {
+                                        runRepository.deleteRun(runId)
+                                        val refreshed = fetchRunSummaryRefs(runRepository)
+                                        runRefs.clear()
+                                        runRefs.addAll(refreshed)
+
+                                        if (runRefs.isNotEmpty()) {
+                                            val first = runRefs.first()
+                                            lastDistance = first.distanceM
+                                            lastDuration = first.durationMs
+                                            lastPath = first.pathPairs
+                                            lastSteps = first.wearableSteps
+                                            lastHeartRate = first.wearableHeartRate
+                                            lastCalories = first.wearableCalories
+                                        } else {
+                                            lastDistance = null
+                                            lastDuration = null
+                                            lastPath = emptyList()
+                                            lastSteps = 0L
+                                            lastHeartRate = 0L
+                                            lastCalories = 0.0
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "삭제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
+                        )
+                    } else {
+                        StatsScreen(
+                            padding = padding,
+                            distance = lastDistance,
+                            duration = lastDuration,
+                            route = lastPath,
+                            steps = lastSteps,
+                            heartRate = lastHeartRate,
+                            calories = lastCalories,
+                            onShowHistory = { showHistory = true }
+                        )
+                    }
+                }
 
-                            if (saveDistance <= 0.0) {
-                                Toast.makeText(context, "거리가 너무 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                1 -> WeeklyStatsScreen(
+                    padding = padding,
+                    runs = runRefs
+                )
+
+                2 -> RunningScreen(
+                    padding = padding,
+                    viewModel = viewModel,
+                    initialLocation = initialLocation,
+                    onRunResult = { distance, duration, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories ->
+                        val endAt = System.currentTimeMillis()
+                        screenScope.launch {
+                            if (pathPairs.size < 2) {
+                                Toast.makeText(context, "경로가 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
                                 return@launch
                             }
 
-                            runRepository.createRun(
-                                distanceM = saveDistance,
-                                durationMs = duration,
-                                startedAt = startTimeMs,
-                                endedAt = endAt,
-                                pathPairs = pathPairs,
-                                wearableSteps = wearableSteps,
-                                wearableHeartRate = wearableHeartRate,
-                                wearableCalories = wearableCalories
-                            )
-                            val refreshed = fetchRunSummaryRefs(runRepository)
-                            runRefs.clear()
-                            runRefs.addAll(refreshed)
+                            try {
+                                val saveDistance = if (distance > 0.0) {
+                                    distance
+                                } else {
+                                    pathPairs.zipWithNext().sumOf { (a, b) ->
+                                        distanceMeters(a.first, a.second, b.first, b.second)
+                                    }
+                                }
 
-                            val latest = runRefs.firstOrNull()
-                            lastDistance = latest?.distanceM ?: saveDistance
-                            lastDuration = latest?.durationMs ?: duration
-                            lastPath = latest?.pathPairs ?: pathPairs
-                            lastSteps = latest?.wearableSteps ?: wearableSteps
-                            lastHeartRate = latest?.wearableHeartRate ?: wearableHeartRate
-                            lastCalories = latest?.wearableCalories ?: wearableCalories
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "러닝 기록 저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            )
-            3 -> CommunityScreen(padding, userName)
-            4 -> {
-                if (myPageSubScreen == MyPageSubScreen.SettingsInfo) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .padding(16.dp)
-                    ) {
-                        Column(
-                            Modifier.fillMaxSize()
-                        ) {
-                            Button(onClick = { myPageSubScreen = MyPageSubScreen.Settings }) {
-                                Text("← 뒤로")
+                                if (saveDistance <= 0.0) {
+                                    Toast.makeText(context, "거리가 너무 짧아서 기록을 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
+
+                                runRepository.createRun(
+                                    distanceM = saveDistance,
+                                    durationMs = duration,
+                                    startedAt = startTimeMs,
+                                    endedAt = endAt,
+                                    pathPairs = pathPairs,
+                                    wearableSteps = wearableSteps,
+                                    wearableHeartRate = wearableHeartRate,
+                                    wearableCalories = wearableCalories
+                                )
+                                val refreshed = fetchRunSummaryRefs(runRepository)
+                                runRefs.clear()
+                                runRefs.addAll(refreshed)
+
+                                val latest = runRefs.firstOrNull()
+                                lastDistance = latest?.distanceM ?: saveDistance
+                                lastDuration = latest?.durationMs ?: duration
+                                lastPath = latest?.pathPairs ?: pathPairs
+                                lastSteps = latest?.wearableSteps ?: wearableSteps
+                                lastHeartRate = latest?.wearableHeartRate ?: wearableHeartRate
+                                lastCalories = latest?.wearableCalories ?: wearableCalories
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "러닝 기록 저장 실패: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
-                            Spacer(Modifier.height(12.dp))
-
-                            InfoScreen(padding = PaddingValues(0.dp))
                         }
                     }
-                } else if (myPageSubScreen == MyPageSubScreen.ProfileEdit) {
-                    ProfileEditScreen(
-                        padding = padding,
-                        fallbackUserName = userName,
-                        fallbackProfileUrl = userProfile,
-                        onBack = { myPageSubScreen = MyPageSubScreen.Main }
-                    )
-                } else if (myPageSubScreen == MyPageSubScreen.Achievements) {
-                    AchievementScreen(
-                        padding = padding,
-                        onBack = { myPageSubScreen = MyPageSubScreen.Main }
-                    )
-                } else if (myPageSubScreen == MyPageSubScreen.Settings) {
-                    SettingsScreen(
-                        padding = padding,
-                        onBack = { myPageSubScreen = MyPageSubScreen.Main },
-                        onOpenInfo = { myPageSubScreen = MyPageSubScreen.SettingsInfo }
-                    )
-                } else {
-                    MyPageScreen(
-                        padding = padding,
-                        userName = userName,
-                        userProfile = userProfile,
-                        provider = provider,
-                        onLogout = onLogout,
-                        onOpenAchievements = { myPageSubScreen = MyPageSubScreen.Achievements },
-                        onOpenProfileSettings = { myPageSubScreen = MyPageSubScreen.ProfileEdit },
-                        onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings }
-                    )
+                )
+
+                3 -> CommunityScreen(padding, userName)
+
+                4 -> {
+                    AnimatedContent(
+                        modifier = Modifier.fillMaxSize(),
+                        targetState = myPageSubScreen,
+                        label = "mypage-subscreen-transition",
+                        transitionSpec = {
+                            if (targetState.ordinal > initialState.ordinal) {
+                                (slideInHorizontally(
+                                    animationSpec = tween(240),
+                                    initialOffsetX = { it }
+                                ) + fadeIn(animationSpec = tween(180))).togetherWith(
+                                    slideOutHorizontally(
+                                        animationSpec = tween(240),
+                                        targetOffsetX = { -it / 3 }
+                                    ) + fadeOut(animationSpec = tween(160))
+                                ).using(null)
+                            } else {
+                                (slideInHorizontally(
+                                    animationSpec = tween(240),
+                                    initialOffsetX = { -it }
+                                ) + fadeIn(animationSpec = tween(180))).togetherWith(
+                                    slideOutHorizontally(
+                                        animationSpec = tween(240),
+                                        targetOffsetX = { it / 3 }
+                                    ) + fadeOut(animationSpec = tween(160))
+                                ).using(null)
+                            }
+                        }
+                    ) { subScreen ->
+                        when (subScreen) {
+                            MyPageSubScreen.SettingsInfo -> {
+                                Scaffold(
+                                    modifier = Modifier.padding(padding),
+                                    topBar = {
+                                        TopAppBar(
+                                            title = { Text("앱 정보") },
+                                            navigationIcon = {
+                                                BackNavIconButton {
+                                                    myPageSubScreen = MyPageSubScreen.Settings
+                                                }
+                                            }
+                                        )
+                                    }
+                                ) { innerPadding ->
+                                    InfoScreen(padding = innerPadding)
+                                }
+                            }
+
+                            MyPageSubScreen.ProfileEdit -> {
+                                ProfileEditScreen(
+                                    padding = padding,
+                                    fallbackUserName = userName,
+                                    fallbackProfileUrl = userProfile,
+                                    onBack = { myPageSubScreen = MyPageSubScreen.Main }
+                                )
+                            }
+
+                            MyPageSubScreen.Achievements -> {
+                                AchievementScreen(
+                                    padding = padding,
+                                    onBack = { myPageSubScreen = MyPageSubScreen.Main }
+                                )
+                            }
+
+                            MyPageSubScreen.Settings -> {
+                                SettingsScreen(
+                                    padding = padding,
+                                    onBack = { myPageSubScreen = MyPageSubScreen.Main },
+                                    onOpenInfo = { myPageSubScreen = MyPageSubScreen.SettingsInfo },
+                                    provider = provider,
+                                    onLogout = onLogout
+                                )
+                            }
+
+                            MyPageSubScreen.Main -> {
+                                MyPageScreen(
+                                    padding = padding,
+                                    userName = userName,
+                                    userProfile = userProfile,
+                                    provider = provider,
+                                    onOpenAchievements = { myPageSubScreen = MyPageSubScreen.Achievements },
+                                    onOpenProfileSettings = { myPageSubScreen = MyPageSubScreen.ProfileEdit },
+                                    onOpenAppSettings = { myPageSubScreen = MyPageSubScreen.Settings }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -748,6 +836,13 @@ fun RunningScreen(
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val runRepository = remember { RunRepository() }
+    val uid = auth.currentUser?.uid
+    var dailyGoalKm by remember { mutableStateOf(0.0) }
+    var todayDistanceKm by remember { mutableStateOf(0.0) }
+    var progressReloadTick by remember { mutableStateOf(0) }
 
     val mapView = remember { MapView(context) }
     var kakaoMap by remember { mutableStateOf<KakaoMap?>(null) }
@@ -898,6 +993,7 @@ fun RunningScreen(
 
             if (!dist.isNaN() && time >= 0) {
                 onRunResult(dist, time, pathPairs, startTimeMs, endTimeMs, wearableSteps, wearableHeartRate, wearableCalories)
+                progressReloadTick += 1
             }
 
             if (size > 1 && !followMode) {
@@ -919,6 +1015,36 @@ fun RunningScreen(
         }
     }
 
+
+    LaunchedEffect(uid, progressReloadTick) {
+        if (uid == null) {
+            dailyGoalKm = 0.0
+            todayDistanceKm = 0.0
+            return@LaunchedEffect
+        }
+
+        runCatching {
+            val userDoc = db.collection("users").document(uid).get().await()
+            dailyGoalKm = userDoc.getDouble("dailyGoalKm") ?: 0.0
+
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val dayStart = cal.timeInMillis
+            cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            val dayEnd = cal.timeInMillis
+
+            todayDistanceKm = runRepository.getMyRuns()
+                .asSequence()
+                .filter { it.ended_at in dayStart until dayEnd }
+                .sumOf { it.distance_m } / 1000.0
+        }.onFailure { e ->
+            Log.w("RunningScreen", "failed to load daily progress", e)
+        }
+    }
 
     LaunchedEffect(Unit) {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1089,7 +1215,10 @@ fun RunningScreen(
                         NearbyRoutesSection(
                             viewModel = viewModel,
                             autoLoadNearbyOnStart = false,
-                            onRouteClick = onSelectNearbyRoute
+                            onRouteClick = onSelectNearbyRoute,
+                            listContentPadding = PaddingValues(
+                                bottom = padding.calculateBottomPadding() + 12.dp
+                            )
                         )
                     }
                 }
@@ -1097,6 +1226,19 @@ fun RunningScreen(
             }
         }
     ) {
+        val hasDailyGoal = dailyGoalKm > 0.0
+        val achievedGoal = hasDailyGoal && todayDistanceKm >= dailyGoalKm
+        val headerTitle = if (achievedGoal) {
+            "안녕하세요! 오늘 목표를 달성했어요."
+        } else {
+            "안녕하세요, 오늘도 달려볼까요?"
+        }
+        val headerProgressText = if (hasDailyGoal) {
+            "일일 목표: ${"%.1f".format(java.util.Locale.getDefault(), todayDistanceKm)}km / ${"%.1f".format(java.util.Locale.getDefault(), dailyGoalKm)}km"
+        } else {
+            "일일 목표를 먼저 설정해 주세요"
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1105,7 +1247,7 @@ fun RunningScreen(
             // 카카오맵 배경
             AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-            // 상단 검색바
+            // 상단 목표 카드
             Card(
                 modifier = Modifier
                     .fillMaxWidth(0.92f)
@@ -1117,9 +1259,27 @@ fun RunningScreen(
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Image(
+                        painter = painterResource(id = R.drawable.welcome),
+                        contentDescription = "횃불이",
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("어디서 달리고 싶으신가요?", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column {
+                        Text(
+                            text = headerTitle,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = headerProgressText,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
 
@@ -1728,7 +1888,8 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
     var joinedCrewIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     var selectedTab by remember { mutableStateOf(0) }
-    val tabTitles = listOf("커뮤니티", "크루")
+    val tabTitles = listOf("피드", "크루")
+    var likingPostIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(refreshKey) {
 
         // Firestore에서 최신 글 읽기
@@ -1750,8 +1911,15 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
             )
         }
 
+        val postsWithLikeState: List<Post> = remotePostsForUi.map { uiPost ->
+            val likedByMe = uiPost.docId?.let { docId ->
+                runCatching { repo.isLikedByMe(docId) }.getOrDefault(false)
+            } ?: false
+            uiPost.copy(likedByMe = likedByMe)
+        }
+
         // “기존 로컬글 + Firestore글” 합치기
-        posts = remotePostsForUi
+        posts = postsWithLikeState
         crews = crewRepo.fetchCrews()
         joinedCrewIds = crews.mapNotNull { crew ->
             if (crewRepo.isMember(crew.id)) crew.id else null
@@ -1982,41 +2150,58 @@ fun CommunityScreen(padding: PaddingValues, userName: String?) {
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
 
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Favorite,
-                                            contentDescription = null,
-                                            tint = Color(0xFFE57373),
-                                            modifier = Modifier.clickable {
-                                                val safeDocId = post.docId ?: return@clickable
-                                                // UI 먼저 반영해서 피드에서 즉시 체감되게 처리
-                                                posts = posts.map {
-                                                    if (it.docId == safeDocId) it.copy(likes = (it.likes + 1).coerceAtLeast(0)) else it
-                                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                        val safeDocId = post.docId
+                                        val isLiking = safeDocId != null && likingPostIds.contains(safeDocId)
+                                        IconButton(
+                                            onClick = {
+                                                val docId = safeDocId ?: return@IconButton
+                                                if (isLiking) return@IconButton
                                                 scope.launch {
-                                                    runCatching {
-                                                        repo.toggleLike(safeDocId)
-                                                        val latest = repo.fetchPost(safeDocId)
-                                                        val latestLike = latest?.likeCount?.toInt() ?: post.likes
+                                                    likingPostIds = likingPostIds + docId
+                                                    try {
+                                                        val nowLiked = repo.toggleLike(docId)
+                                                        val latestLike = repo.fetchPost(docId)?.likeCount?.toInt() ?: post.likes
                                                         posts = posts.map {
-                                                            if (it.docId == safeDocId) it.copy(likes = latestLike) else it
-                                                        }
-                                                    }.onFailure {
-                                                        // 실패 시 현재 피드 재동기화
-                                                        runCatching {
-                                                            val latest = repo.fetchPost(safeDocId)
-                                                            val latestLike = latest?.likeCount?.toInt() ?: post.likes
-                                                            posts = posts.map {
-                                                                if (it.docId == safeDocId) it.copy(likes = latestLike) else it
+                                                            if (it.docId == docId) {
+                                                                it.copy(likes = latestLike, likedByMe = nowLiked)
+                                                            } else {
+                                                                it
                                                             }
                                                         }
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "좋아요 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                        val latestLike = runCatching {
+                                                            repo.fetchPost(docId)?.likeCount?.toInt()
+                                                        }.getOrNull() ?: post.likes
+                                                        val latestLikedByMe = runCatching {
+                                                            repo.isLikedByMe(docId)
+                                                        }.getOrDefault(post.likedByMe)
+                                                        posts = posts.map {
+                                                            if (it.docId == docId) {
+                                                                it.copy(likes = latestLike, likedByMe = latestLikedByMe)
+                                                            } else {
+                                                                it
+                                                            }
+                                                        }
+                                                    } finally {
+                                                        likingPostIds = likingPostIds - docId
                                                     }
                                                 }
-                                            }
-                                        )
+                                            },
+                                            enabled = safeDocId != null && !isLiking,
+                                            modifier = Modifier.size(22.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Favorite,
+                                                contentDescription = null,
+                                                tint = if (post.likedByMe) Color.Red else Color.LightGray,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                         Text("${post.likes}", fontSize = 15.sp)
                                     }
 
@@ -2173,6 +2358,7 @@ data class Post(
     val content: String,
     var likes: Int = 0,
     var comments: Int = 0,
+    val likedByMe: Boolean = false,
     val imageRes: Int,
     val imageUri: String? = null,
     val distanceKm: Double? = null,
@@ -2245,7 +2431,6 @@ fun MyPageScreen(
     userName: String?,
     userProfile: String?,
     provider: String?,
-    onLogout: () -> Unit,
     onOpenAchievements: () -> Unit,
     onOpenProfileSettings: () -> Unit,
     onOpenAppSettings: () -> Unit
@@ -2258,7 +2443,6 @@ fun MyPageScreen(
     var uid by remember { mutableStateOf(auth.currentUser?.uid) }
     // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
     var profileUrlFromDb by remember { mutableStateOf<String?>(null) }
-    var showMenu by remember { mutableStateOf(false) }
     var myPosts by remember { mutableStateOf<List<MyPagePostItem>>(emptyList()) }
     var postsLoading by remember { mutableStateOf(true) }
     DisposableEffect(Unit) {
@@ -2341,20 +2525,37 @@ fun MyPageScreen(
                 .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
-            // 오른쪽 위 메뉴 버튼
+            // 오른쪽 위 환경설정 버튼
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                IconButton(
-                    onClick = { showMenu = true }
+                Card(
+                    modifier = Modifier.clickable { onOpenAppSettings() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F0EE)),
+                    elevation = CardDefaults.cardElevation(0.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "메뉴"
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "환경설정",
+                            tint = Color(0xFF2A2A2A),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "환경설정",
+                            color = Color(0xFF2A2A2A),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -2366,25 +2567,48 @@ fun MyPageScreen(
             ) {
                 val currentTitle = "첫 러닝 스타터"
 
-                if (displayProfileUrl != null) {
-                    Image(
-                        painter = rememberAsyncImagePainter(displayProfileUrl),
-                        contentDescription = "Profile",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(110.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, Color.LightGray, CircleShape)
-                    )
-                } else {
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clickable { onOpenProfileSettings() }
+                ) {
+                    if (displayProfileUrl != null) {
+                        Image(
+                            painter = rememberAsyncImagePainter(displayProfileUrl),
+                            contentDescription = "Profile",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .border(2.dp, Color.LightGray, CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color.LightGray),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🙂", fontSize = 36.sp)
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
-                            .size(110.dp)
+                            .size(28.dp)
                             .clip(CircleShape)
-                            .background(Color.LightGray),
+                            .background(Color(0xFFFAFAF8))
+                            .border(1.dp, Color(0xFFE0E0DE), CircleShape)
+                            .align(Alignment.BottomEnd),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("🙂", fontSize = 36.sp)
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "프로필 변경",
+                            tint = Color(0xFF2A2A2A),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
 
@@ -2402,15 +2626,35 @@ fun MyPageScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color(0xFFF4EDFF))
+                        .clickable { onOpenAchievements() }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
-                    Text(
-                        text = currentTitle,
-                        color = Color(0xFF6750A4),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = currentTitle,
+                            color = Color(0xFF6750A4),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "업적 보기",
+                            tint = Color(0xFF6750A4),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "배지를 눌러 업적 보기",
+                    color = Color(0xFF8A8A88),
+                    fontSize = 11.sp
+                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -2486,115 +2730,6 @@ fun MyPageScreen(
                 }
             }
         }
-
-        // 카드형 팝업 메뉴
-        if (showMenu) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF1A1A1A).copy(alpha = 0.28f))
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { showMenu = false }
-            ) {
-                Card(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 70.dp, end = 16.dp)
-                        .width(350.dp)
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { },
-                    shape = RoundedCornerShape(24.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp)
-                    ) {
-                        Text(
-                            text = "더 보기",
-                            color = Color(0xFFFAFAF8),
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                MenuPopupButton(
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.EmojiEvents,
-                                            contentDescription = "업적",
-                                            tint = Color(0xFFFAFAF8)
-                                        )
-                                    },
-                                    title = "업적",
-                                    onClick = {
-                                        showMenu = false
-                                        onOpenAchievements()
-                                    }
-                                )
-
-                                MenuPopupButton(
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Person,
-                                            contentDescription = "프로필 변경",
-                                            tint = Color(0xFFFAFAF8)
-                                        )
-                                    },
-                                    title = "프로필 변경",
-                                    onClick = {
-                                        showMenu = false
-                                        onOpenProfileSettings()
-                                    }
-                                )
-                                MenuPopupButton(
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Logout,
-                                            contentDescription = "로그아웃",
-                                            tint = Color(0xFFFAFAF8)
-                                        )
-                                    },
-                                    title = "로그아웃",
-                                    onClick = {
-                                        showMenu = false
-                                        logoutAll(context, provider) { onLogout() }
-                                    }
-                                )
-
-                                MenuPopupButton(
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = "환경설정",
-                                            tint = Color(0xFFFAFAF8)
-                                        )
-                                    },
-                                    title = "환경설정",
-                                    onClick = {
-                                        showMenu = false
-                                        onOpenAppSettings()
-                                    }
-                                )
-                            }
-
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -2643,11 +2778,14 @@ private fun AchievementScreen(
     val unlockedCount = achievements.count { it.unlocked }
 
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding),
         topBar = {
             TopAppBar(
                 title = { Text("업적") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("뒤로") }
+                    BackNavIconButton(onClick = onBack)
                 }
             )
         }
@@ -2655,9 +2793,11 @@ private fun AchievementScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(innerPadding)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding() + 16.dp,
+                bottom = innerPadding.calculateBottomPadding() + 16.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
@@ -2833,7 +2973,7 @@ private fun ProfileEditScreen(
             TopAppBar(
                 title = { Text("프로필 변경") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("뒤로") }
+                    BackNavIconButton(onClick = onBack)
                 }
             )
         }
@@ -3299,7 +3439,9 @@ private fun NumberWheel(
 private fun SettingsScreen(
     padding: PaddingValues,
     onBack: () -> Unit,
-    onOpenInfo: () -> Unit
+    onOpenInfo: () -> Unit,
+    provider: String?,
+    onLogout: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -3329,7 +3471,7 @@ private fun SettingsScreen(
             TopAppBar(
                 title = { Text("환경설정") },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("뒤로") }
+                    BackNavIconButton(onClick = onBack)
                 }
             )
         }
@@ -3385,6 +3527,65 @@ private fun SettingsScreen(
                         )
                         Text(
                             text = "버전과 서비스 정보를 확인하세요",
+                            style = TextStyle(fontSize = 13.sp, color = Color.Gray)
+                        )
+                    }
+
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = Color.LightGray
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "계정",
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        logoutAll(context, provider) { onLogout() }
+                    },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(Color(0xFFE9ECEF), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = null,
+                            tint = Color.Gray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "로그아웃",
+                            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        )
+                        Text(
+                            text = "현재 계정에서 로그아웃합니다",
                             style = TextStyle(fontSize = 13.sp, color = Color.Gray)
                         )
                     }
@@ -3917,13 +4118,7 @@ private fun HistoryList(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = onBack,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF204996),
-                        contentColor = Color(0xFFFAFAF8)
-                    )
-                ) { Text("← 뒤로") }
+                BackNavIconButton(onClick = onBack)
                 Text("러닝 기록", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Spacer(Modifier.width(1.dp))
             }

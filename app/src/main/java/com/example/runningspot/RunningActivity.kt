@@ -13,6 +13,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -438,9 +440,18 @@ class RunningActivity : ComponentActivity() {
             )
         }
 
+        val bottomBasePaddingLeft = 16
+        val bottomBasePaddingTop = 20
+        val bottomBasePaddingRight = 16
+        val bottomBasePaddingBottom = 12
         val bottomContainer = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(16, 20, 16, 12)
+            setPadding(
+                bottomBasePaddingLeft,
+                bottomBasePaddingTop,
+                bottomBasePaddingRight,
+                bottomBasePaddingBottom
+            )
             minimumHeight = (resources.displayMetrics.heightPixels * 0.22f).toInt()
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(Color.parseColor("#FAFAF8"))
@@ -468,12 +479,26 @@ class RunningActivity : ComponentActivity() {
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = android.view.Gravity.BOTTOM
-                bottomMargin = 14
+                bottomMargin = 0
             }
         )
 
         // ✅ 레이아웃 최종 지정
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val navBarBottomInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val targetPaddingBottom = bottomBasePaddingBottom + navBarBottomInset
+            if (bottomContainer.paddingBottom != targetPaddingBottom) {
+                bottomContainer.setPadding(
+                    bottomBasePaddingLeft,
+                    bottomBasePaddingTop,
+                    bottomBasePaddingRight,
+                    targetPaddingBottom
+                )
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
 
         // ✅ 뒤로가기 버튼 처리
         onBackPressedDispatcher.addCallback(
