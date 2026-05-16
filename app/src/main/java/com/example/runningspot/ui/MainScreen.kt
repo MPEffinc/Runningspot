@@ -182,6 +182,7 @@ import com.example.runningspot.data.repository.RunRepository
 // ===== 임시 DB: SharedPreferences + 내부파일(JSON) =====
 private const val RUN_SP = "run_pref"
 private const val RUN_KEY = "runs_json"
+private const val USER_FIELD_SELECTED_BADGE_TITLE = "selectedBadgeTitle"
 private fun distanceMeters(
     lat1: Double,
     lng1: Double,
@@ -757,6 +758,7 @@ fun MainScreen(
                             MyPageSubScreen.Achievements -> {
                                 AchievementScreen(
                                     padding = padding,
+                                    runs = runRefs,
                                     onBack = { myPageSubScreen = MyPageSubScreen.Main }
                                 )
                             }
@@ -2443,6 +2445,7 @@ fun MyPageScreen(
     var uid by remember { mutableStateOf(auth.currentUser?.uid) }
     // ✅ Firestore에 저장된 프로필 URL (있으면 이걸 우선)
     var profileUrlFromDb by remember { mutableStateOf<String?>(null) }
+    var selectedBadgeTitle by remember { mutableStateOf<String?>(null) }
     var myPosts by remember { mutableStateOf<List<MyPagePostItem>>(emptyList()) }
     var postsLoading by remember { mutableStateOf(true) }
     DisposableEffect(Unit) {
@@ -2462,6 +2465,7 @@ fun MyPageScreen(
             val doc = db.collection("users").document(currentUid).get().await()
             nicknameFromDb = doc.getString("nickname")
             profileUrlFromDb = doc.getString("profileUrl")
+            selectedBadgeTitle = doc.getString(USER_FIELD_SELECTED_BADGE_TITLE)
         } catch (e: Exception) {
             Log.e("MyPageScreen", "유저 정보 불러오기 실패", e)
             // 실패해도 그냥 기본 프로필(userProfile)로 보여주면 됨
@@ -2562,10 +2566,10 @@ fun MyPageScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val currentTitle = "첫 러닝 스타터"
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+                val currentTitle = selectedBadgeTitle?.takeIf { it.isNotBlank() } ?: "대표 배지를 선택해 주세요"
 
                 Box(
                     modifier = Modifier
@@ -2648,14 +2652,6 @@ fun MyPageScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "배지를 눌러 업적 보기",
-                    color = Color(0xFF8A8A88),
-                    fontSize = 11.sp
-                )
-
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
@@ -2734,48 +2730,155 @@ fun MyPageScreen(
 }
 
 private data class AchievementUiModel(
+    val id: String,
     val title: String,
     val description: String,
-    val unlocked: Boolean
+    val unlocked: Boolean,
+    val badgeEmoji: String
 )
+
+private fun dayStartMillis(timeMs: Long): Long {
+    val cal = java.util.Calendar.getInstance().apply {
+        timeInMillis = timeMs
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    return cal.timeInMillis
+}
+
+private fun calculateMaxStreakDays(runs: List<RunSummaryRef>): Int {
+    if (runs.isEmpty()) return 0
+    val dayStarts = runs.map { dayStartMillis(it.endAt) }.toSet().toList().sorted()
+    var maxStreak = 1
+    var currentStreak = 1
+    val oneDayMs = 24L * 60L * 60L * 1000L
+
+    for (i in 1 until dayStarts.size) {
+        val gap = dayStarts[i] - dayStarts[i - 1]
+        if (gap == oneDayMs) {
+            currentStreak += 1
+            maxStreak = maxOf(maxStreak, currentStreak)
+        } else if (gap > oneDayMs) {
+            currentStreak = 1
+        }
+    }
+    return maxStreak
+}
+
+private fun buildAchievementModels(
+    runs: List<RunSummaryRef>,
+    postCount: Int
+): List<AchievementUiModel> {
+    val totalDistanceKm = runs.sumOf { it.distanceM } / 1000.0
+    val maxStreakDays = calculateMaxStreakDays(runs)
+    val dawnRuns = runs.count {
+        val hour = java.util.Calendar.getInstance().apply {
+            timeInMillis = it.endAt
+        }.get(java.util.Calendar.HOUR_OF_DAY)
+        hour < 6
+    }
+
+    return listOf(
+        AchievementUiModel(
+            id = "first_run",
+            title = "첫 러닝 스타터",
+            description = "첫 러닝을 완료했어요",
+            unlocked = runs.isNotEmpty(),
+            badgeEmoji = "\uD83C\uDFC3"
+        ),
+        AchievementUiModel(
+            id = "distance_100",
+            title = "백만 불 짜리 다리",
+            description = "누적 거리 100km 달성",
+            unlocked = totalDistanceKm >= 100.0,
+            badgeEmoji = "\uD83D\uDCAA"
+        ),
+        AchievementUiModel(
+            id = "streak_7",
+            title = "꾸준한 러너",
+            description = "7일 연속 러닝 달성",
+            unlocked = maxStreakDays >= 7,
+            badgeEmoji = "\uD83D\uDD25"
+        ),
+        AchievementUiModel(
+            id = "dawn_5",
+            title = "새벽의 질주자",
+            description = "오전 6시 이전 러닝 5회",
+            unlocked = dawnRuns >= 5,
+            badgeEmoji = "\uD83C\uDF05"
+        ),
+        AchievementUiModel(
+            id = "community_first",
+            title = "커뮤니티 입문자",
+            description = "게시글 첫 작성 완료",
+            unlocked = postCount >= 1,
+            badgeEmoji = "\uD83D\uDCAC"
+        )
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AchievementScreen(
     padding: PaddingValues,
+    runs: List<RunSummaryRef>,
     onBack: () -> Unit
 ) {
-    val achievements = remember {
-        listOf(
-            AchievementUiModel(
-                title = "첫 러닝 스타터",
-                description = "첫 러닝을 완료했어요",
-                unlocked = true
-            ),
-            AchievementUiModel(
-                title = "백만 불 짜리 다리",
-                description = "누적 거리 100km 달성",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "꾸준한 러너",
-                description = "7일 연속 러닝 달성",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "새벽의 질주자",
-                description = "오전 6시 이전 러닝 5회",
-                unlocked = false
-            ),
-            AchievementUiModel(
-                title = "커뮤니티 입문자",
-                description = "게시글 첫 작성 완료",
-                unlocked = true
-            )
-        )
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = auth.currentUser?.uid
+    var postCount by remember { mutableStateOf(0) }
+    var selectedBadgeTitle by remember { mutableStateOf<String?>(null) }
+    var isSavingBadge by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uid) {
+        val currentUid = uid ?: return@LaunchedEffect
+        runCatching {
+            val userDoc = db.collection("users").document(currentUid).get().await()
+            selectedBadgeTitle = userDoc.getString(USER_FIELD_SELECTED_BADGE_TITLE)
+
+            val postSnap = db.collection("posts")
+                .whereEqualTo("userId", currentUid)
+                .get()
+                .await()
+            postCount = postSnap.size()
+        }.onFailure { e ->
+            Log.e("AchievementScreen", "업적 정보 불러오기 실패", e)
+        }
+    }
+
+    val achievements = remember(runs, postCount) {
+        buildAchievementModels(runs = runs, postCount = postCount)
     }
 
     val unlockedCount = achievements.count { it.unlocked }
+    val representativeTitle = selectedBadgeTitle
+        ?.takeIf { selected -> achievements.any { it.unlocked && it.title == selected } }
+        ?: achievements.firstOrNull { it.unlocked }?.title
+        ?: "아직 대표 배지가 없어요"
+
+    fun setRepresentativeBadge(title: String) {
+        val currentUid = uid ?: return
+        if (isSavingBadge) return
+        isSavingBadge = true
+        scope.launch {
+            runCatching {
+                db.collection("users").document(currentUid)
+                    .set(mapOf(USER_FIELD_SELECTED_BADGE_TITLE to title), SetOptions.merge())
+                    .await()
+                selectedBadgeTitle = title
+                Toast.makeText(context, "대표 배지로 설정했어요", Toast.LENGTH_SHORT).show()
+            }.onFailure { e ->
+                Log.e("AchievementScreen", "대표 배지 저장 실패", e)
+                Toast.makeText(context, "배지 설정에 실패했어요", Toast.LENGTH_SHORT).show()
+            }
+            isSavingBadge = false
+        }
+    }
 
     Scaffold(
         modifier = Modifier
@@ -2818,7 +2921,7 @@ private fun AchievementScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "첫 러닝 스타터",
+                            text = representativeTitle,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF3D2A73)
@@ -2833,8 +2936,14 @@ private fun AchievementScreen(
                 }
             }
 
-            items(achievements) { achievement ->
+            items(items = achievements, key = { it.id }) { achievement ->
+                val isSelectedBadge = achievement.unlocked && achievement.title == representativeTitle
                 Card(
+                    modifier = Modifier.clickable(
+                        enabled = achievement.unlocked && !isSelectedBadge && !isSavingBadge
+                    ) {
+                        setRepresentativeBadge(achievement.title)
+                    },
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = if (achievement.unlocked) Color(0xFFFAFAF8) else Color(0xFFF3F3F3)
@@ -2857,7 +2966,7 @@ private fun AchievementScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (achievement.unlocked) "🏆" else "🔒",
+                                text = if (achievement.unlocked) achievement.badgeEmoji else "🔒",
                                 fontSize = 24.sp
                             )
                         }
@@ -2879,12 +2988,30 @@ private fun AchievementScreen(
                             )
                         }
 
-                        Text(
-                            text = if (achievement.unlocked) "달성" else "미달성",
-                            color = if (achievement.unlocked) Color(0xFF6750A4) else Color.Gray,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
+                        if (achievement.unlocked) {
+                            if (isSelectedBadge) {
+                                Text(
+                                    text = "대표 배지",
+                                    color = Color(0xFF6750A4),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            } else {
+                                Text(
+                                    text = "설정",
+                                    color = Color(0xFF6750A4),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "미달성",
+                                color = Color.Gray,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
