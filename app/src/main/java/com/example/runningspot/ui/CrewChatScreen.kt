@@ -1,5 +1,6 @@
 package com.example.runningspot.ui
 
+import android.app.Activity
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +21,11 @@ import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+
 data class CrewMessage(
     val id: String = "",
     val uid: String = "",
@@ -39,6 +44,8 @@ fun CrewChatScreen(crewId: String) {
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<CrewMessage>>(emptyList()) }
     val listState = rememberLazyListState()
+    var crewTitle by remember { mutableStateOf("크루") }
+    var crewMemberText by remember { mutableStateOf("0") }
 
     // ✅ 멤버 여부 (멤버만 채팅 가능)
     var isMember by remember { mutableStateOf(false) }
@@ -77,6 +84,19 @@ fun CrewChatScreen(crewId: String) {
 
         onDispose { reg.remove() }
     }
+    DisposableEffect(crewId) {
+        val reg: ListenerRegistration = db.collection("crews").document(crewId)
+            .addSnapshotListener { snap, _ ->
+                if (snap == null || !snap.exists()) return@addSnapshotListener
+                val title = snap.getString("title")?.takeIf { it.isNotBlank() } ?: "크루"
+                val currentMembers = snap.getLong("currentMembers") ?: 0L
+                crewTitle = title
+                crewMemberText = currentMembers.toString()
+            }
+
+        onDispose { reg.remove() }
+    }
+
     val scope = rememberCoroutineScope()
 
     // ✅ 멤버 문서 실시간 구독: crews/{crewId}/members/{uid} 존재 여부
@@ -102,7 +122,28 @@ fun CrewChatScreen(crewId: String) {
         containerColor = Color(0xFFFAFAF8),
         topBar = {
             TopAppBar(
-                title = { Text("크루 채팅", color = Color(0xFF1A1A1A)) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = crewTitle,
+                            color = Color(0xFF1A1A1A),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = crewMemberText,
+                            color = Color(0xFF1A1A1A)
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = { (context as? Activity)?.finish() }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "뒤로가기"
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFAFAF8))
             )
         }

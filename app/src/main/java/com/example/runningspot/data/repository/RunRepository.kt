@@ -27,7 +27,11 @@ class RunRepository {
         distanceM: Double,
         durationMs: Long,
         endedAt: Long,
-        pathPairs: List<Pair<Double, Double>>
+        startedAt: Long?,
+        pathPairs: List<Pair<Double, Double>>,
+        wearableSteps: Long,
+        wearableHeartRate: Long,
+        wearableCalories: Double
     ): Long {
         val body = CreateRunRecordRequest(
             distance_m = distanceM,

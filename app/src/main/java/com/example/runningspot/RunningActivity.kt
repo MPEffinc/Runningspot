@@ -438,9 +438,18 @@ class RunningActivity : ComponentActivity() {
             )
         }
 
+        val bottomBasePaddingLeft = 16
+        val bottomBasePaddingTop = 20
+        val bottomBasePaddingRight = 16
+        val bottomBasePaddingBottom = 12
         val bottomContainer = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(16, 20, 16, 12)
+            setPadding(
+                bottomBasePaddingLeft,
+                bottomBasePaddingTop,
+                bottomBasePaddingRight,
+                bottomBasePaddingBottom
+            )
             minimumHeight = (resources.displayMetrics.heightPixels * 0.22f).toInt()
             background = android.graphics.drawable.GradientDrawable().apply {
                 setColor(Color.parseColor("#FAFAF8"))

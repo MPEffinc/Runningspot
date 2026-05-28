@@ -3,6 +3,7 @@ package com.example.runningspot.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,7 +30,8 @@ fun NearbyRoutesSection(
     viewModel: RouteViewModel,
     onRouteClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    autoLoadNearbyOnStart: Boolean = true
+    autoLoadNearbyOnStart: Boolean = true,
+    listContentPadding: PaddingValues = PaddingValues(0.dp)
 ) {
     val nearbyRoutes by viewModel.nearbyRoutes.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -61,6 +63,7 @@ fun NearbyRoutesSection(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth(),
+                    contentPadding = listContentPadding,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(nearbyRoutes.size) { i ->
